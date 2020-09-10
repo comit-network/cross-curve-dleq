@@ -6,5 +6,5 @@ edition = "2018"
 
 [dependencies]
 ecdsa_fun = { git = "https://github.com/LLFourn/secp256kfun", features = ["libsecp_compat"] }
-ed25519-dalek = "1"
+curve25519-dalek = "3"
 rand = "0.7"

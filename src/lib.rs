@@ -9,8 +9,8 @@ mod tests {
 
     #[test]
     fn secp256k1_key_from_ed25519_key_produces_same_bytes() {
-        let ed25519 = ed25519_dalek::Keypair::generate(&mut thread_rng());
-        let ed25519_bytes = ed25519.secret.to_bytes();
+        let ed25519 = curve25519_dalek::scalar::Scalar::random(&mut thread_rng());
+        let ed25519_bytes = ed25519.to_bytes();
 
         let secp256k1 = Scalar::from_bytes_mod_order(ed25519_bytes);
         let secp256k1_bytes = secp256k1.to_bytes();
