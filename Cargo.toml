@@ -9,5 +9,7 @@ bigint = "4"
 bit-vec = "0.6"
 curve25519-dalek = "3"
 ecdsa_fun = { git = "https://github.com/LLFourn/secp256kfun", features = ["libsecp_compat"] }
+hex-literal = "0.2"
+lazy_static = "1.4"
 rand = "0.7"
 sha2 = "0.9"
