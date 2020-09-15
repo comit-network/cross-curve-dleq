@@ -1,27 +1,30 @@
 #![allow(non_snake_case)]
 
 use bit_vec::BitVec;
+use ecdsa_fun::fun::{
+    marker::{Jacobian, NonZero, Normal},
+    s,
+};
 use ed25519::{H, H_PRIME};
 use rand::{CryptoRng, RngCore};
 use secp256k1::{
     g,
-    marker::{Jacobian, Mark, Public, Secret, Zero},
+    marker::{Mark, Secret, Zero},
     G, G_PRIME,
 };
+use sha2::{Digest, Sha256};
+use std::ops::{Add, Sub};
 
 mod secp256k1 {
-    use ecdsa_fun::fun::marker::Mark;
-
     pub use ecdsa_fun::fun::{g, marker, s, Point, Scalar, G};
 
     lazy_static::lazy_static! {
         /// Alternate generator of secp256k1.
-        pub static ref G_PRIME: Point<marker::Jacobian> =
+        pub static ref G_PRIME: Point =
             Point::from_bytes(hex_literal::hex!(
                 "0250929b74c1a04954b78b4b6035e97a5e078a5a0f28ec96d547bfee9ace803ac0"
             ))
-            .expect("valid point")
-            .mark::<marker::Jacobian>();
+            .expect("valid point");
     }
 }
 
@@ -48,6 +51,7 @@ mod ed25519 {
 }
 
 /// A scalar that is valid for both secp256k1 and ed25519.
+#[derive(Clone, Copy)]
 pub struct Scalar([u8; 32]);
 
 impl Scalar {
@@ -85,7 +89,7 @@ impl Scalar {
             .collect()
     }
 
-    pub fn into_secp256k1(self) -> secp256k1::Scalar<Secret, Zero> {
+    pub fn into_secp256k1(self) -> secp256k1::Scalar {
         self.into()
     }
 
@@ -94,9 +98,28 @@ impl Scalar {
     }
 }
 
+impl Sub<Scalar> for Scalar {
+    type Output = Scalar;
+    fn sub(self, rhs: Scalar) -> Self::Output {
+        let res = self.into_ed25519() - rhs.into_ed25519();
+
+        Scalar(*res.as_bytes())
+    }
+}
+
+impl Add<Scalar> for Scalar {
+    type Output = Scalar;
+    fn add(self, rhs: Scalar) -> Self::Output {
+        let res = self.into_ed25519() + rhs.into_ed25519();
+
+        Scalar(*res.as_bytes())
+    }
+}
+
 pub type BitOpenings = Vec<(BitOpening<secp256k1::Scalar>, BitOpening<ed25519::Scalar>)>;
 
 /// The opening to a Pedersen Commitment to the value of a bit.
+#[derive(Clone, Copy)]
 pub struct BitOpening<S> {
     bit: bool,
     blinder: S,
@@ -111,16 +134,23 @@ impl BitOpening<secp256k1::Scalar> {
         Self { bit, blinder }
     }
 
-    fn commit(&self) -> BitCommitment<secp256k1::Point<Jacobian, Public, Zero>> {
-        let b = if self.bit {
-            secp256k1::Scalar::one().mark::<Zero>()
-        } else {
-            secp256k1::Scalar::zero()
-        };
-
+    fn commit(&self) -> BitCommitment<secp256k1::Point<Jacobian>> {
+        let b = bit_as_secp256k1_scalar(self.bit);
         let r = self.blinder.clone();
 
-        BitCommitment(g!(b * G + r * G_PRIME))
+        BitCommitment(
+            g!(b * G + r * G_PRIME)
+                .mark::<NonZero>()
+                .expect("r to be non-zero"),
+        )
+    }
+}
+
+fn bit_as_secp256k1_scalar(bit: bool) -> secp256k1::Scalar<Secret, Zero> {
+    if bit {
+        secp256k1::Scalar::one().mark::<Zero>()
+    } else {
+        secp256k1::Scalar::zero()
     }
 }
 
@@ -132,21 +162,26 @@ impl BitOpening<ed25519::Scalar> {
     }
 
     fn commit(&self) -> BitCommitment<ed25519::Point> {
-        let b = if self.bit {
-            ed25519::Scalar::one()
-        } else {
-            ed25519::Scalar::zero()
-        };
-
+        let b = bit_as_ed25519_scalar(self.bit);
         let s = self.blinder;
 
         BitCommitment(b * H + s * *H_PRIME)
     }
 }
 
-impl From<Scalar> for secp256k1::Scalar<Secret, Zero> {
+fn bit_as_ed25519_scalar(bit: bool) -> ed25519::Scalar {
+    if bit {
+        ed25519::Scalar::one()
+    } else {
+        ed25519::Scalar::zero()
+    }
+}
+
+impl From<Scalar> for secp256k1::Scalar {
     fn from(from: Scalar) -> Self {
-        Self::from_bytes_mod_order(from.0)
+        secp256k1::Scalar::<Secret, Zero>::from_bytes_mod_order(from.0)
+            .mark::<NonZero>()
+            .expect("non-zero scalar")
     }
 }
 
@@ -156,11 +191,190 @@ impl From<Scalar> for ed25519::Scalar {
     }
 }
 
+pub struct Proof {
+    c: Scalar,
+    c_0s: Vec<Scalar>,
+    c_1s: Vec<Scalar>,
+    U_G_0s: Vec<secp256k1::Point>,
+    U_H_0s: Vec<ed25519::Point>,
+    U_G_1s: Vec<secp256k1::Point>,
+    U_H_1s: Vec<ed25519::Point>,
+    res_G_0s: Vec<secp256k1::Scalar>,
+    res_H_0s: Vec<ed25519::Scalar>,
+    res_G_1s: Vec<secp256k1::Scalar>,
+    res_H_1s: Vec<ed25519::Scalar>,
+}
+
+pub fn cross_group_dleq_prove<R: RngCore + CryptoRng>(
+    rng: &mut R,
+    bit_openings: BitOpenings,
+) -> Proof {
+    let n_bits = bit_openings.len();
+
+    let mut C_Gs = Vec::new();
+    let mut C_Hs = Vec::new();
+
+    let mut c_cheats = Vec::new();
+
+    let mut U_G_0s = Vec::new();
+    let mut U_H_0s = Vec::new();
+    let mut U_G_1s = Vec::new();
+    let mut U_H_1s = Vec::new();
+
+    let mut res_G_0s = Vec::new();
+    let mut res_H_0s = Vec::new();
+    let mut res_G_1s = Vec::new();
+    let mut res_H_1s = Vec::new();
+
+    for (BitOpening { bit: b, blinder: r }, BitOpening { blinder: s, .. }) in
+        bit_openings.clone().into_iter()
+    {
+        // Compute commitment corresponding to each opening
+        let C_G = BitOpening { bit: b, blinder: r }.commit().0;
+        let C_H = BitOpening { bit: b, blinder: s }.commit().0;
+
+        // We prove knowledge of the discrete log of C_{G,H} - b{G,H}
+        // with respect to {G,H}, proving that it was in fact a
+        // commitment to b and proving knowledge of the blinder {r,s}
+        let rG_prime = {
+            let b = bit_as_secp256k1_scalar(b);
+            g!(C_G - b * G)
+        };
+        let sH_prime = {
+            let b = bit_as_ed25519_scalar(b);
+            C_H - b * H
+        };
+
+        // Generate randomness for actual bit w.r.t. secp256k1 and ed25519 groups
+        let u_G = secp256k1::Scalar::random(rng);
+        let u_H = ed25519::Scalar::random(rng);
+        // Compute announcement for actual bit w.r.t. secp256k1 and ed25519 groups
+        // TODO: Determine if it's supposed to be times G or G_prime, etc.
+        let U_G = g!(u_G * G).mark::<Normal>();
+        let U_H = u_H * H;
+
+        // Randomly generate challenge for the wrong bit
+        let c_cheat = Scalar::random(rng);
+
+        // Randomly generate responses for wrong bit w.r.t. secp256k1 and ed25519 groups
+        let res_G_cheat = secp256k1::Scalar::random(rng);
+        let res_H_cheat = ed25519::Scalar::random(rng);
+        // Build announcements using pre-generated challenge and response w.r.t secp256k1 and ed25519 groups
+        let U_G_cheat = {
+            let c_cheat = c_cheat.into_secp256k1();
+            g!(res_G_cheat * G - c_cheat * rG_prime)
+                .mark::<Normal>()
+                .mark::<NonZero>()
+                .expect("non-zero announcement")
+        };
+        let U_H_cheat = {
+            let c_cheat = c_cheat.into_ed25519();
+            res_H_cheat * H - c_cheat * sH_prime
+        };
+
+        C_Gs.push(C_G);
+        C_Hs.push(C_H);
+
+        c_cheats.push(c_cheat);
+
+        if b {
+            U_G_0s.push(U_G_cheat);
+            U_H_0s.push(U_H_cheat);
+            res_G_0s.push(res_G_cheat);
+            res_H_0s.push(res_H_cheat);
+
+            U_G_1s.push(U_G);
+            U_H_1s.push(U_H);
+            res_G_1s.push(u_G);
+            res_H_1s.push(u_H);
+        } else {
+            U_G_0s.push(U_G);
+            U_H_0s.push(U_H);
+            res_G_0s.push(u_G);
+            res_H_0s.push(u_H);
+
+            U_G_1s.push(U_G_cheat);
+            U_H_1s.push(U_H_cheat);
+            res_G_1s.push(res_G_cheat);
+            res_H_1s.push(res_H_cheat);
+        }
+    }
+
+    // TODO: Extract into function which will also be used when verifying
+    let c = {
+        let mut hasher = Sha256::default();
+
+        for i in 0..n_bits {
+            hasher.update(C_Gs[i].clone().mark::<Normal>().to_bytes());
+            hasher.update(C_Hs[i].compress().as_bytes());
+            hasher.update(U_G_0s[i].clone().mark::<Normal>().to_bytes());
+            hasher.update(U_G_1s[i].clone().mark::<Normal>().to_bytes());
+            hasher.update(U_H_0s[i].compress().as_bytes());
+            hasher.update(U_H_1s[i].compress().as_bytes());
+        }
+
+        let hash = hasher.finalize();
+
+        let mut bytes = [0u8; 32];
+        bytes.copy_from_slice(hash.as_slice());
+
+        Scalar(bytes)
+    };
+
+    let mut c_0s = Vec::new();
+    let mut c_1s = Vec::new();
+
+    for (i, (BitOpening { bit: b, blinder: r }, BitOpening { blinder: s, .. })) in
+        bit_openings.into_iter().enumerate()
+    {
+        if b {
+            let c_0 = c_cheats[i];
+            let c_1 = c - c_0;
+
+            res_G_1s[i] = s!({ res_G_1s[i].clone() } + { c_1.into_secp256k1() } * r)
+                .mark::<NonZero>()
+                .expect("non-zero response");
+            res_H_1s[i] += c_1.into_ed25519() * s;
+
+            c_0s.push(c_0);
+            c_1s.push(c_1);
+        } else {
+            let c_1 = c_cheats[i];
+            let c_0 = c - c_1;
+
+            res_G_0s[i] = s!({ res_G_1s[i].clone() } + { c_1.into_secp256k1() } * r)
+                .mark::<NonZero>()
+                .expect("non-zero response");
+            res_H_0s[i] += c_1.into_ed25519() * s;
+
+            c_0s.push(c_0);
+            c_1s.push(c_1);
+        };
+    }
+
+    Proof {
+        c,
+        c_0s,
+        c_1s,
+        U_G_0s,
+        U_H_0s,
+        U_G_1s,
+        U_H_1s,
+        res_G_0s,
+        res_H_0s,
+        res_G_1s,
+        res_H_1s,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use bigint::U256;
-    use ecdsa_fun::fun::{marker::Normal, s};
+    use ecdsa_fun::fun::{
+        marker::{Jacobian, Normal},
+        s,
+    };
     use rand::thread_rng;
 
     #[test]
@@ -236,5 +450,12 @@ mod tests {
 
         let x = secp256k1::Scalar::from(x);
         assert_eq!(g!(C - r * G_PRIME), g!(x * G));
+    }
+
+    #[test]
+    fn can_generate_proof() {
+        let x = Scalar::random(&mut thread_rng());
+
+        cross_group_dleq_prove(&mut thread_rng(), x.bit_openings(&mut thread_rng()));
     }
 }
