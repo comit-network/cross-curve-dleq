@@ -1,5 +1,6 @@
 #![allow(non_snake_case)]
 
+use bigint::U256;
 use bit_vec::BitVec;
 use ecdsa_fun::fun::{
     marker::{Jacobian, NonZero, Normal},
@@ -86,7 +87,7 @@ impl Scalar {
                     BitOpening::<ed25519::Scalar>::new(rng, bit),
                 )
             })
-            .collect()
+            .collect::<BitOpenings>()
     }
 
     pub fn into_secp256k1(self) -> secp256k1::Scalar {
@@ -117,6 +118,47 @@ impl Add<Scalar> for Scalar {
 }
 
 pub type BitOpenings = Vec<(BitOpening<secp256k1::Scalar>, BitOpening<ed25519::Scalar>)>;
+pub type BitCommitments = Vec<(
+    BitCommitment<secp256k1::Point<Jacobian>>,
+    BitCommitment<ed25519::Point>,
+)>;
+
+/// Calculate sum of `blinder_i * 2^i`, where `i` is the bit index.
+pub fn blinder_sums(openings: BitOpenings) -> (secp256k1::Scalar, ed25519::Scalar) {
+    let two = U256::from(2u8);
+
+    let r_total = openings
+        .iter()
+        .map(|(secp256k1, _)| secp256k1)
+        .enumerate()
+        .fold(
+            secp256k1::Scalar::zero(),
+            |acc, (i, BitOpening { blinder: r, .. })| {
+                let exp = two.pow(U256::from(i));
+                let exp = secp256k1::Scalar::from_bytes(exp.into()).unwrap();
+
+                s!(acc + exp * r)
+            },
+        )
+        .mark::<NonZero>()
+        .expect("non-zero r_total");
+
+    let s_total = openings
+        .iter()
+        .map(|(_, ed25519)| ed25519)
+        .enumerate()
+        .fold(
+            ed25519::Scalar::zero(),
+            |acc, (i, BitOpening { blinder: s, .. })| {
+                let exp = two.pow(U256::from(i));
+                let exp = ed25519::Scalar::from_bytes_mod_order(exp.into());
+
+                acc + exp * s
+            },
+        );
+
+    (r_total, s_total)
+}
 
 /// The opening to a Pedersen Commitment to the value of a bit.
 #[derive(Clone, Copy)]
@@ -192,7 +234,6 @@ impl From<Scalar> for ed25519::Scalar {
 }
 
 pub struct Proof {
-    c: Scalar,
     c_0s: Vec<Scalar>,
     c_1s: Vec<Scalar>,
     U_G_0s: Vec<secp256k1::Point>,
@@ -205,11 +246,8 @@ pub struct Proof {
     res_H_1s: Vec<ed25519::Scalar>,
 }
 
-pub fn cross_group_dleq_prove<R: RngCore + CryptoRng>(
-    rng: &mut R,
-    bit_openings: BitOpenings,
-) -> Proof {
-    let n_bits = bit_openings.len();
+pub fn cross_group_dleq_prove<R: RngCore + CryptoRng>(rng: &mut R, openings: BitOpenings) -> Proof {
+    let n_bits = openings.len();
 
     let mut C_Gs = Vec::new();
     let mut C_Hs = Vec::new();
@@ -227,7 +265,7 @@ pub fn cross_group_dleq_prove<R: RngCore + CryptoRng>(
     let mut res_H_1s = Vec::new();
 
     for (BitOpening { bit: b, blinder: r }, BitOpening { blinder: s, .. }) in
-        bit_openings.clone().into_iter()
+        openings.clone().into_iter()
     {
         // Compute commitment corresponding to each opening
         let C_G = BitOpening { bit: b, blinder: r }.commit().0;
@@ -325,7 +363,7 @@ pub fn cross_group_dleq_prove<R: RngCore + CryptoRng>(
     let mut c_1s = Vec::new();
 
     for (i, (BitOpening { bit: b, blinder: r }, BitOpening { blinder: s, .. })) in
-        bit_openings.into_iter().enumerate()
+        openings.into_iter().enumerate()
     {
         if b {
             let c_0 = c_cheats[i];
@@ -353,7 +391,6 @@ pub fn cross_group_dleq_prove<R: RngCore + CryptoRng>(
     }
 
     Proof {
-        c,
         c_0s,
         c_1s,
         U_G_0s,
@@ -365,6 +402,52 @@ pub fn cross_group_dleq_prove<R: RngCore + CryptoRng>(
         res_G_1s,
         res_H_1s,
     }
+}
+
+// TODO: Test this function
+pub fn verify_bit_commitments_represent_dleq_commitments(
+    bit_commitments: BitCommitments,
+    blinder_sums: (secp256k1::Scalar, ed25519::Scalar),
+    dleq_commitments: (secp256k1::Point, ed25519::Point),
+) -> bool {
+    let (r_total, s_total) = blinder_sums;
+    let (xG, xH) = dleq_commitments;
+
+    let two = U256::from(2u8);
+
+    let C_G_total = bit_commitments
+        .iter()
+        .map(|(secp256k1, _)| secp256k1)
+        .enumerate()
+        .fold(
+            secp256k1::Point::zero().mark::<Jacobian>(),
+            |acc, (i, BitCommitment(C_G))| {
+                let exp = two.pow(U256::from(i));
+                let exp = secp256k1::Scalar::<Secret, Zero>::from_bytes(exp.into()).unwrap();
+
+                g!(acc + exp * C_G)
+            },
+        );
+
+    let C_H_total = bit_commitments
+        .iter()
+        .map(|(_, ed25519)| ed25519)
+        .enumerate()
+        .fold(
+            ed25519::Scalar::zero() * H,
+            |acc, (i, BitCommitment(C_H))| {
+                let exp = two.pow(U256::from(i));
+                let exp = ed25519::Scalar::from_bytes_mod_order(exp.into());
+
+                acc + exp * C_H
+            },
+        );
+
+    g!(C_G_total - r_total * G_PRIME) == xG && C_H_total - s_total * *H_PRIME == xH
+}
+
+pub fn verify_cross_group_dleq_proof(commitments: BitCommitments, proof: Proof) -> bool {
+    todo!()
 }
 
 #[cfg(test)]
