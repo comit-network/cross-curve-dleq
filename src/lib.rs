@@ -72,14 +72,14 @@ impl Scalar {
     // TODO: This is always 256 bits, so we could produce an array of that
     // size instead of a vector.
 
-    /// Generate Pedersen Commitments for each bit on both secp256k1 and ed25519.
-    pub fn bit_commitments<R: RngCore + CryptoRng>(&self, rng: &mut R) -> BitCommitments {
+    /// Generate openings for Pedersen Commitments to each bit on both secp256k1 and ed25519.
+    pub fn bit_openings<R: RngCore + CryptoRng>(&self, rng: &mut R) -> BitOpenings {
         self.bits()
             .iter()
             .map(|bit| {
                 (
-                    BitCommitment::<secp256k1::Point<Jacobian, Public, Zero>>::new(rng, bit),
-                    BitCommitment::<ed25519::Point>::new(rng, bit),
+                    BitOpening::<secp256k1::Scalar>::new(rng, bit),
+                    BitOpening::<ed25519::Scalar>::new(rng, bit),
                 )
             })
             .collect()
@@ -94,39 +94,53 @@ impl Scalar {
     }
 }
 
-pub type BitCommitments = Vec<(
-    BitCommitment<secp256k1::Point<Jacobian, Public, Zero>>,
-    BitCommitment<ed25519::Point>,
-)>;
+pub type BitOpenings = Vec<(BitOpening<secp256k1::Scalar>, BitOpening<ed25519::Scalar>)>;
 
-/// A Pedersen Commitment to the value of a bit.
-pub struct BitCommitment<S>(S);
+/// The opening to a Pedersen Commitment to the value of a bit.
+pub struct BitOpening<S> {
+    bit: bool,
+    blinder: S,
+}
 
-impl BitCommitment<secp256k1::Point<Jacobian, Public, Zero>> {
+pub struct BitCommitment<P>(P);
+
+impl BitOpening<secp256k1::Scalar> {
     fn new<R: RngCore + CryptoRng>(rng: &mut R, bit: bool) -> Self {
-        let b = if bit {
+        let blinder = secp256k1::Scalar::random(rng);
+
+        Self { bit, blinder }
+    }
+
+    fn commit(&self) -> BitCommitment<secp256k1::Point<Jacobian, Public, Zero>> {
+        let b = if self.bit {
             secp256k1::Scalar::one().mark::<Zero>()
         } else {
             secp256k1::Scalar::zero()
         };
 
-        let r = secp256k1::Scalar::random(rng);
+        let r = self.blinder.clone();
 
-        Self(g!(b * G + r * G_PRIME))
+        BitCommitment(g!(b * G + r * G_PRIME))
     }
 }
 
-impl BitCommitment<ed25519::Point> {
+impl BitOpening<ed25519::Scalar> {
     fn new<R: RngCore + CryptoRng>(rng: &mut R, bit: bool) -> Self {
-        let b = if bit {
+        let blinder = ed25519::Scalar::random(rng);
+
+        Self { bit, blinder }
+    }
+
+    fn commit(&self) -> BitCommitment<ed25519::Point> {
+        let b = if self.bit {
             ed25519::Scalar::one()
         } else {
             ed25519::Scalar::zero()
         };
 
-        let s = ed25519::Scalar::random(rng);
+        let s = self.blinder;
 
-        Self(b * H + s * *H_PRIME)
+        BitCommitment(b * H + s * *H_PRIME)
     }
 }
 
