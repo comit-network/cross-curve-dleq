@@ -52,7 +52,7 @@ mod ed25519 {
 }
 
 /// A scalar that is valid for both secp256k1 and ed25519.
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Scalar([u8; 32]);
 
 impl Scalar {
@@ -99,21 +99,21 @@ impl Scalar {
     }
 }
 
-impl Sub<Scalar> for Scalar {
-    type Output = Scalar;
-    fn sub(self, rhs: Scalar) -> Self::Output {
-        let res = self.into_ed25519() - rhs.into_ed25519();
-
-        Scalar(*res.as_bytes())
-    }
-}
-
 impl Add<Scalar> for Scalar {
     type Output = Scalar;
     fn add(self, rhs: Scalar) -> Self::Output {
-        let res = self.into_ed25519() + rhs.into_ed25519();
+        let res = s!({ self.into_secp256k1() } + { rhs.into_secp256k1() });
 
-        Scalar(*res.as_bytes())
+        Scalar(res.to_bytes())
+    }
+}
+
+impl Sub<Scalar> for Scalar {
+    type Output = Scalar;
+    fn sub(self, rhs: Scalar) -> Self::Output {
+        let res = s!({ self.into_secp256k1() } - { rhs.into_secp256k1() });
+
+        Scalar(res.to_bytes())
     }
 }
 
@@ -167,6 +167,7 @@ pub struct BitOpening<S> {
     blinder: S,
 }
 
+#[derive(Debug, Clone, Copy)]
 pub struct BitCommitment<P>(P);
 
 impl BitOpening<secp256k1::Scalar> {
@@ -181,7 +182,7 @@ impl BitOpening<secp256k1::Scalar> {
         let r = self.blinder.clone();
 
         BitCommitment(
-            g!(b * G + r * G_PRIME)
+            g!(b * G_PRIME + r * G)
                 .mark::<NonZero>()
                 .expect("r to be non-zero"),
         )
@@ -207,7 +208,7 @@ impl BitOpening<ed25519::Scalar> {
         let b = bit_as_ed25519_scalar(self.bit);
         let s = self.blinder;
 
-        BitCommitment(b * H + s * *H_PRIME)
+        BitCommitment(b * *H_PRIME + s * H)
     }
 }
 
@@ -216,6 +217,13 @@ fn bit_as_ed25519_scalar(bit: bool) -> ed25519::Scalar {
         ed25519::Scalar::one()
     } else {
         ed25519::Scalar::zero()
+    }
+}
+
+impl From<[u8; 32]> for Scalar {
+    fn from(from: [u8; 32]) -> Self {
+        let scalar = ed25519::Scalar::from_bytes_mod_order(from);
+        Self(*scalar.as_bytes())
     }
 }
 
@@ -275,12 +283,12 @@ pub fn cross_group_dleq_prove<R: RngCore + CryptoRng>(rng: &mut R, openings: Bit
         // with respect to {G,H}, proving that it was in fact a
         // commitment to b and proving knowledge of the blinder {r,s}
         let rG_prime = {
-            let b = bit_as_secp256k1_scalar(b);
-            g!(C_G - b * G)
+            let b = bit_as_secp256k1_scalar(!b);
+            g!(C_G - b * G_PRIME)
         };
         let sH_prime = {
-            let b = bit_as_ed25519_scalar(b);
-            C_H - b * H
+            let b = bit_as_ed25519_scalar(!b);
+            C_H - b * *H_PRIME
         };
 
         // Generate randomness for actual bit w.r.t. secp256k1 and ed25519 groups
@@ -356,7 +364,7 @@ pub fn cross_group_dleq_prove<R: RngCore + CryptoRng>(rng: &mut R, openings: Bit
         let mut bytes = [0u8; 32];
         bytes.copy_from_slice(hash.as_slice());
 
-        Scalar(bytes)
+        Scalar::from(bytes)
     };
 
     let mut c_0s = Vec::new();
@@ -380,10 +388,10 @@ pub fn cross_group_dleq_prove<R: RngCore + CryptoRng>(rng: &mut R, openings: Bit
             let c_1 = c_cheats[i];
             let c_0 = c - c_1;
 
-            res_G_0s[i] = s!({ res_G_1s[i].clone() } + { c_1.into_secp256k1() } * r)
+            res_G_0s[i] = s!({ res_G_0s[i].clone() } + { c_0.into_secp256k1() } * r)
                 .mark::<NonZero>()
                 .expect("non-zero response");
-            res_H_0s[i] += c_1.into_ed25519() * s;
+            res_H_0s[i] += c_0.into_ed25519() * s;
 
             c_0s.push(c_0);
             c_1s.push(c_1);
@@ -442,11 +450,71 @@ pub fn verify_bit_commitments_represent_dleq_commitments(
             },
         );
 
-    g!(C_G_total - r_total * G_PRIME) == xG && C_H_total - s_total * *H_PRIME == xH
+    g!(C_G_total - r_total * G) == xG && C_H_total - s_total * H == xH
 }
 
-pub fn verify_cross_group_dleq_proof(commitments: BitCommitments, proof: Proof) -> bool {
-    todo!()
+pub enum ProofVerificationError {
+    ChallengeSum,
+    Response,
+}
+
+pub fn verify_cross_group_dleq_proof(
+    commitments: BitCommitments,
+    proof: Proof,
+) -> Result<(), ProofVerificationError> {
+    let n_bits = commitments.len();
+
+    let c = {
+        let mut hasher = Sha256::default();
+
+        for i in 0..n_bits {
+            hasher.update((commitments[i].0).0.clone().mark::<Normal>().to_bytes());
+            hasher.update((commitments[i].1).0.compress().as_bytes());
+            hasher.update(proof.U_G_0s[i].clone().mark::<Normal>().to_bytes());
+            hasher.update(proof.U_G_1s[i].clone().mark::<Normal>().to_bytes());
+            hasher.update(proof.U_H_0s[i].compress().as_bytes());
+            hasher.update(proof.U_H_1s[i].compress().as_bytes());
+        }
+
+        let hash = hasher.finalize();
+
+        let mut bytes = [0u8; 32];
+        bytes.copy_from_slice(hash.as_slice());
+
+        Scalar::from(bytes)
+    };
+
+    for i in 0..n_bits {
+        let c_0 = proof.c_0s[i];
+        let c_1 = proof.c_1s[i];
+
+        if c != c_0 + c_1 {
+            return Err(ProofVerificationError::ChallengeSum);
+        }
+
+        let res_G_0 = proof.res_G_0s[i].clone();
+        let res_G_1 = proof.res_G_1s[i].clone();
+        let res_H_0 = proof.res_H_0s[i];
+        let res_H_1 = proof.res_H_1s[i];
+
+        let U_G_0 = proof.U_G_0s[i].clone();
+        let U_G_1 = proof.U_G_1s[i].clone();
+        let U_H_0 = proof.U_H_0s[i];
+        let U_H_1 = proof.U_H_1s[i];
+
+        let C_G = commitments[i].0.clone().0;
+        let C_H = (commitments[i].1).0;
+
+        if g!(res_G_0 * G) != g!(U_G_0 + { c_0.into_secp256k1() } * C_G)
+            || g!(res_G_1 * G) != g!(U_G_1 + { c_1.into_secp256k1() } * (C_G - G_PRIME))
+            || res_H_0 * H != U_H_0 + c_0.into_ed25519() * C_H
+            || res_H_1 * H != U_H_1 + c_1.into_ed25519() * (C_H - *H_PRIME)
+        {
+            return Err(ProofVerificationError::Response);
+        }
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]
@@ -492,8 +560,8 @@ mod tests {
     #[test]
     fn bit_commitments_represent_dleq_commitments() {
         let x = Scalar::random(&mut thread_rng());
-        let xG = g!({ x.into_secp256k1() } * G);
-        let xH = x.into_ed25519() * H;
+        let xG = g!({ x.into_secp256k1() } * G_PRIME);
+        let xH = x.into_ed25519() * *H_PRIME;
 
         let bit_openings = x.bit_openings(&mut thread_rng());
         let bit_commitments = bit_openings
@@ -508,5 +576,20 @@ mod tests {
             blinder_sums,
             (xG, xH),
         ));
+    }
+
+    #[test]
+    fn cross_group_dleq_proof_is_valid() {
+        let x = Scalar::random(&mut thread_rng());
+
+        let bit_openings = x.bit_openings(&mut thread_rng());
+        let bit_commitments = bit_openings
+            .iter()
+            .map(|(secp256k1, ed25519)| (secp256k1.commit(), ed25519.commit()))
+            .collect();
+
+        let proof = cross_group_dleq_prove(&mut thread_rng(), bit_openings);
+
+        assert!(verify_cross_group_dleq_proof(bit_commitments, proof).is_ok());
     }
 }
