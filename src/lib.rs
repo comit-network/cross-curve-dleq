@@ -404,11 +404,10 @@ pub fn cross_group_dleq_prove<R: RngCore + CryptoRng>(rng: &mut R, openings: Bit
     }
 }
 
-// TODO: Test this function
 pub fn verify_bit_commitments_represent_dleq_commitments(
     bit_commitments: BitCommitments,
     blinder_sums: (secp256k1::Scalar, ed25519::Scalar),
-    dleq_commitments: (secp256k1::Point, ed25519::Point),
+    dleq_commitments: (secp256k1::Point<Jacobian>, ed25519::Point),
 ) -> bool {
     let (r_total, s_total) = blinder_sums;
     let (xG, xH) = dleq_commitments;
@@ -454,10 +453,7 @@ pub fn verify_cross_group_dleq_proof(commitments: BitCommitments, proof: Proof) 
 mod tests {
     use super::*;
     use bigint::U256;
-    use ecdsa_fun::fun::{
-        marker::{Jacobian, Normal},
-        s,
-    };
+    use ecdsa_fun::fun::marker::Normal;
     use rand::thread_rng;
 
     #[test]
@@ -494,51 +490,23 @@ mod tests {
     }
 
     #[test]
-    fn point_equals_commitments_minus_public_blinding_factor() {
+    fn bit_commitments_represent_dleq_commitments() {
         let x = Scalar::random(&mut thread_rng());
+        let xG = g!({ x.into_secp256k1() } * G);
+        let xH = x.into_ed25519() * H;
 
-        let mut rs = Vec::new();
-        let mut Cs = Vec::new();
-        for b_i in x.bits().iter() {
-            let b_i = if b_i {
-                secp256k1::Scalar::one().mark::<Zero>()
-            } else {
-                secp256k1::Scalar::zero()
-            };
+        let bit_openings = x.bit_openings(&mut thread_rng());
+        let bit_commitments = bit_openings
+            .iter()
+            .map(|(secp256k1, ed25519)| (secp256k1.commit(), ed25519.commit()))
+            .collect();
 
-            let r_i = secp256k1::Scalar::random(&mut thread_rng());
+        let blinder_sums = blinder_sums(bit_openings);
 
-            let C_i = g!(b_i * G + r_i * G_PRIME);
-
-            rs.push(r_i);
-            Cs.push(C_i);
-        }
-
-        let mut C = secp256k1::Point::zero().mark::<Jacobian>();
-        let two = U256::from(2u8);
-        for (i, C_i) in Cs.iter().enumerate() {
-            let exp = two.pow(U256::from(i));
-            let exp = secp256k1::Scalar::<Secret, Zero>::from_bytes(exp.into()).unwrap();
-
-            C = g!(C + exp * C_i);
-        }
-
-        let mut r = secp256k1::Scalar::zero();
-        for (i, r_i) in rs.iter().enumerate() {
-            let exp = two.pow(U256::from(i));
-            let exp = secp256k1::Scalar::<Secret, Zero>::from_bytes(exp.into()).unwrap();
-
-            r = s!(r + exp * r_i)
-        }
-
-        let x = secp256k1::Scalar::from(x);
-        assert_eq!(g!(C - r * G_PRIME), g!(x * G));
-    }
-
-    #[test]
-    fn can_generate_proof() {
-        let x = Scalar::random(&mut thread_rng());
-
-        cross_group_dleq_prove(&mut thread_rng(), x.bit_openings(&mut thread_rng()));
+        assert!(verify_bit_commitments_represent_dleq_commitments(
+            bit_commitments,
+            blinder_sums,
+            (xG, xH),
+        ));
     }
 }
