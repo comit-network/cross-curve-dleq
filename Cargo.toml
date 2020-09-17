@@ -1,9 +1,19 @@
 [package]
-name = "sigma"
+name = "cross-curve-dleq"
 version = "0.1.0"
-authors = ["Lucas Soriano del Pino <l.soriano.del.pino@gmail.com>"]
+authors = ["CoBloX Team <team@coblox.tech>"]
 edition = "2018"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [dependencies]
+bigint = "4"
+bit-vec = "0.6"
+curve25519-dalek = "3"
+ecdsa_fun = { git = "https://github.com/LLFourn/secp256kfun", features = ["libsecp_compat"] }
+hex-literal = "0.2"
+lazy_static = "1.4"
+rand = "0.7"
+sha2 = "0.9"
+thiserror = "1"
+
+[dev-dependencies]
+proptest = "0.10"
