@@ -1,67 +1,43 @@
 #![allow(non_snake_case)]
 
+mod ed25519;
+mod secp256k1;
+
+use crate::{
+    ed25519::{H, H_PRIME},
+    secp256k1::{
+        g,
+        marker::{Mark, Secret, Zero},
+        G, G_PRIME,
+    },
+};
 use bigint::U256;
 use bit_vec::BitVec;
 use ecdsa_fun::fun::{
     marker::{Jacobian, NonZero, Normal},
     s,
 };
-use ed25519::{H, H_PRIME};
 use rand::{CryptoRng, RngCore};
-use secp256k1::{
-    g,
-    marker::{Mark, Secret, Zero},
-    G, G_PRIME,
-};
 use sha2::{Digest, Sha256};
 use std::ops::{Add, Sub};
 
-mod secp256k1 {
-    pub use ecdsa_fun::fun::{g, marker, s, Point, Scalar, G};
-
-    lazy_static::lazy_static! {
-        /// Alternate generator of secp256k1.
-        pub static ref G_PRIME: Point =
-            Point::from_bytes(hex_literal::hex!(
-                "0250929b74c1a04954b78b4b6035e97a5e078a5a0f28ec96d547bfee9ace803ac0"
-            ))
-            .expect("valid point");
-    }
-}
-
-mod ed25519 {
-    use curve25519_dalek::{
-        self,
-        edwards::{CompressedEdwardsY, EdwardsPoint},
-    };
-
-    pub use curve25519_dalek::{constants::ED25519_BASEPOINT_POINT as H, scalar::Scalar};
-
-    pub type Point = EdwardsPoint;
-
-    lazy_static::lazy_static! {
-        /// Alternate generator of ed25519.
-        pub static ref H_PRIME: EdwardsPoint = {
-            CompressedEdwardsY(hex_literal::hex!(
-                "8b655970153799af2aeadc9ff1add0ea6c7251d54154cfa92c173a0dd39c1f94"
-            ))
-            .decompress()
-            .expect("edwards point")
-        };
-    }
-}
-
 /// A scalar that is valid for both secp256k1 and ed25519.
+///
+/// Any valid scalar for ed25519 has the same bit representation for
+/// secp256k1, due to the smaller curve order for ed25519 compared to
+/// secp256k1.
+///
+/// On the other hand, not all valid scalars for secp256k1 have the
+/// same bit representation for ed25519.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Scalar([u8; 32]);
 
 impl Scalar {
     /// Generate a random scalar.
     ///
-    /// Given the smaller curve order for ed25519, any scalar for
-    /// ed25519 will have the same byte representation for secp256k1.
-    /// We can therefore use the `curve25519_dalek::scalar::Scalar`
-    /// type to generate our type.
+    /// To ensure that the scalar is valid and equal for both
+    /// secp256k1 and ed25519, we delegate to an `ed25519::Scalar`
+    /// API.
     pub fn random<R: RngCore + CryptoRng>(rng: &mut R) -> Self {
         let ed25519 = ed25519::Scalar::random(rng);
         let bytes = ed25519.to_bytes();
@@ -70,14 +46,22 @@ impl Scalar {
     }
 
     /// Bit representation of the scalar.
-    pub fn bits(&self) -> BitVec {
+    ///
+    /// The vector of bits is ordered from least significant bit to
+    /// most significant bit.
+    fn bits(&self) -> BitVec {
+        // We reverse the vector of bits to ensure that the bits are
+        // ordered from LSB to MSB.
         BitVec::from_bytes(&self.0).iter().rev().collect()
     }
 
     // TODO: This is always 256 bits, so we could produce an array of that
     // size instead of a vector.
 
-    /// Generate openings for Pedersen Commitments to each bit on both secp256k1 and ed25519.
+    // TODO: Return tuple of two types of bit opening instead?
+
+    /// Generate openings for Pedersen Commitments to each bit on both
+    /// secp256k1 and ed25519.
     pub fn bit_openings<R: RngCore + CryptoRng>(&self, rng: &mut R) -> BitOpenings {
         self.bits()
             .iter()
@@ -99,6 +83,10 @@ impl Scalar {
     }
 }
 
+/// Implement addition for `Scalar`.
+///
+/// We choose to rely on `secp256k1::Scalar` for this, but it should
+/// be equivalent to use `ed25519::Scalar` instead.
 impl Add<Scalar> for Scalar {
     type Output = Scalar;
     fn add(self, rhs: Scalar) -> Self::Output {
@@ -108,6 +96,10 @@ impl Add<Scalar> for Scalar {
     }
 }
 
+/// Implement subtraction for `Scalar`.
+///
+/// We choose to rely on `secp256k1::Scalar` for this, but it should
+/// be equivalent to use `ed25519::Scalar` instead.
 impl Sub<Scalar> for Scalar {
     type Output = Scalar;
     fn sub(self, rhs: Scalar) -> Self::Output {
