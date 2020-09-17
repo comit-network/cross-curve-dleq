@@ -124,13 +124,13 @@ impl From<Scalar> for ed25519::Scalar {
 pub struct Proof {
     /// Pedersen Commitments for bits of the secp256k1 scalar.
     ///
-    /// Mathematical expression: `b_i * G_PRIME + r_i * G`, where `b_i` is the
+    /// Mathematical expression: `b_i * G + r_i * G_PRIME`, where `b_i` is the
     /// `ith` bit, `r_i` is its blinder, and `G` and `G_PRIME` are generators of
     /// secp256k1.
     C_G_is: Vec<secp256k1::Point<Jacobian>>,
     /// Pedersen Commitments for bits of the ed25519 scalar.
     ///
-    /// Mathematical expression: `b_i * H_PRIME + s_i * H`, where `b_i` is the
+    /// Mathematical expression: `b_i * H + s_i * H_PRIME`, where `b_i` is the
     /// `ith` bit, `s_i` is its blinder, and `H` and `H_PRIME` are generators of
     /// secp256k1.
     C_H_is: Vec<ed25519::Point>,
@@ -195,25 +195,24 @@ impl Proof {
             let (C_G, r) = secp256k1::PedersenCommitment::commit(rng, b);
             let (C_H, s) = ed25519::PedersenCommitment::commit(rng, b);
 
-            // We prove knowledge of the discrete log of C_{G,H} - b{G,H}
-            // with respect to {G,H}, proving that it was in fact a
-            // commitment to b and proving knowledge of the blinder {r,s}
+            // We prove knowledge of the discrete log of C_{G,H} - b{G_PRIME,H_PRIME} with
+            // respect to {G,H}, proving that it was in fact a commitment to b and proving
+            // knowledge of the blinder {r,s}
             let rG_prime = {
                 let b = secp256k1::bit_as_scalar(!b);
-                g!(C_G - b * G_PRIME)
+                g!(C_G - b * G)
             };
             let sH_prime = {
                 let b = ed25519::bit_as_scalar(!b);
-                C_H - b * *H_PRIME
+                C_H - b * H
             };
 
             // Generate randomness for actual bit w.r.t. secp256k1 and ed25519 groups
             let u_G = secp256k1::Scalar::random(rng);
             let u_H = ed25519::Scalar::random(rng);
             // Compute announcement for actual bit w.r.t. secp256k1 and ed25519 groups
-            // TODO: Determine if it's supposed to be times G or G_prime, etc.
-            let U_G = g!(u_G * G).mark::<Normal>();
-            let U_H = u_H * H;
+            let U_G = g!(u_G * G_PRIME).mark::<Normal>();
+            let U_H = u_H * *H_PRIME;
 
             // Randomly generate challenge for the wrong bit
             let c_cheat = Scalar::random(rng);
@@ -225,14 +224,14 @@ impl Proof {
             // secp256k1 and ed25519 groups
             let U_G_cheat = {
                 let c_cheat = c_cheat.into_secp256k1();
-                g!(res_G_cheat * G - c_cheat * rG_prime)
+                g!(res_G_cheat * G_PRIME - c_cheat * rG_prime)
                     .mark::<Normal>()
                     .mark::<NonZero>()
                     .expect("non-zero announcement")
             };
             let U_H_cheat = {
                 let c_cheat = c_cheat.into_ed25519();
-                res_H_cheat * H - c_cheat * sH_prime
+                res_H_cheat * *H_PRIME - c_cheat * sH_prime
             };
 
             C_G_is.push(C_G);
@@ -356,24 +355,12 @@ impl Proof {
         Scalar::from(bytes)
     }
 
-    pub fn verify(
-        &self,
-        xG_prime: &secp256k1::Point<Jacobian>,
-        xH_prime: ed25519::Point,
-    ) -> Result<(), Error> {
-        if !secp256k1::verify_bit_commitments_represent_dleq_commitment(
-            &self.C_G_is,
-            xG_prime,
-            &self.r,
-        ) {
+    pub fn verify(&self, xG: &secp256k1::Point<Jacobian>, xH: ed25519::Point) -> Result<(), Error> {
+        if !secp256k1::verify_bit_commitments_represent_dleq_commitment(&self.C_G_is, xG, &self.r) {
             return Err(Error::Secp256k1BitCommitmentRepresentation);
         }
 
-        if !ed25519::verify_bit_commitments_represent_dleq_commitment(
-            &self.C_H_is,
-            xH_prime,
-            self.s,
-        ) {
+        if !ed25519::verify_bit_commitments_represent_dleq_commitment(&self.C_H_is, xH, self.s) {
             return Err(Error::Ed25519BitCommitmentRepresentation);
         }
 
@@ -409,10 +396,10 @@ impl Proof {
             let U_H_0 = self.U_H_0s[i];
             let U_H_1 = self.U_H_1s[i];
 
-            if g!(res_G_0 * G) != g!(U_G_0 + { c_0.into_secp256k1() } * C_G_i)
-                || g!(res_G_1 * G) != g!(U_G_1 + { c_1.into_secp256k1() } * (C_G_i - G_PRIME))
-                || res_H_0 * H != U_H_0 + c_0.into_ed25519() * C_H_i
-                || res_H_1 * H != U_H_1 + c_1.into_ed25519() * (C_H_i - *H_PRIME)
+            if g!(res_G_0 * G_PRIME) != g!(U_G_0 + { c_0.into_secp256k1() } * C_G_i)
+                || g!(res_G_1 * G_PRIME) != g!(U_G_1 + { c_1.into_secp256k1() } * (C_G_i - G))
+                || res_H_0 * *H_PRIME != U_H_0 + c_0.into_ed25519() * C_H_i
+                || res_H_1 * *H_PRIME != U_H_1 + c_1.into_ed25519() * (C_H_i - H)
             {
                 return Err(Error::ResponseVerification);
             }
@@ -490,12 +477,12 @@ mod tests {
         fn cross_group_dleq_proof_is_valid(
             x in proptest::scalar(),
         ) {
-            let xG_prime = g!({ x.into_secp256k1() } * G_PRIME);
-            let xH_prime = x.into_ed25519() * *H_PRIME;
+            let xG = g!({ x.into_secp256k1() } * G);
+            let xH = x.into_ed25519() * H;
 
             let proof = Proof::new(&mut thread_rng(), &x);
 
-            assert!(proof.verify(&xG_prime, xH_prime).is_ok());
+            assert!(proof.verify(&xG, xH).is_ok());
         }
     }
 }

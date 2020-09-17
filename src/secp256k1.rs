@@ -22,7 +22,7 @@ impl PedersenCommitment {
         x: &Scalar<Secret, Zero>,
     ) -> (Self, Scalar) {
         let r = Scalar::random(rng);
-        let commitment = g!(x * G_PRIME + r * G)
+        let commitment = g!(x * G + r * G_PRIME)
             .mark::<NonZero>()
             .expect("r to be non-zero");
 
@@ -70,7 +70,7 @@ pub fn blinder_sum(r_is: &[Scalar]) -> Scalar {
 
 pub fn verify_bit_commitments_represent_dleq_commitment(
     C_G_is: &[Point<Jacobian>],
-    xG_prime: &Point<Jacobian>,
+    xG: &Point<Jacobian>,
     r: &Scalar,
 ) -> bool {
     let two = U256::from(2u8);
@@ -86,7 +86,7 @@ pub fn verify_bit_commitments_represent_dleq_commitment(
                 g!(acc + exp * C_H_i)
             });
 
-    &g!(C_G - r * G) == xG_prime
+    &g!(C_G - r * G_PRIME) == xG
 }
 
 #[cfg(test)]
@@ -101,7 +101,7 @@ mod tests {
         fn bit_commitments_represent_dleq_commitment(x in proptest::scalar()) {
             let mut rng = rand::thread_rng();
 
-            let xG_prime = g!({ x.into_secp256k1() } * G_PRIME);
+            let xG = g!({ x.into_secp256k1() } * G);
 
             let (C_G_is, r_is) = x
                 .bits()
@@ -112,7 +112,7 @@ mod tests {
             let r = blinder_sum(&r_is);
 
             assert!(verify_bit_commitments_represent_dleq_commitment(
-                &C_G_is, &xG_prime, &r
+                &C_G_is, &xG, &r
             ));
         }
     }

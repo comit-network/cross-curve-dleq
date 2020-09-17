@@ -22,7 +22,7 @@ pub struct PedersenCommitment(Point);
 impl PedersenCommitment {
     pub fn new<R: rand::RngCore + rand::CryptoRng>(rng: &mut R, x: Scalar) -> (Self, Scalar) {
         let s = Scalar::random(rng);
-        let C_H = x * *H_PRIME + s * H;
+        let C_H = x * H + s * *H_PRIME;
 
         (Self(C_H), s)
     }
@@ -64,7 +64,7 @@ pub fn blinder_sum(s_is: Vec<Scalar>) -> Scalar {
 
 pub fn verify_bit_commitments_represent_dleq_commitment(
     C_H_is: &[Point],
-    xH_prime: Point,
+    xH: Point,
     s: Scalar,
 ) -> bool {
     let two = U256::from(2u8);
@@ -80,7 +80,7 @@ pub fn verify_bit_commitments_represent_dleq_commitment(
                 acc + exp * C_H_i
             });
 
-    C_H - s * H == xH_prime
+    C_H - s * *H_PRIME == xH
 }
 
 #[cfg(test)]
@@ -95,7 +95,7 @@ mod tests {
         fn bit_commitments_represent_dleq_commitment(x in proptest::scalar()) {
             let mut rng = rand::thread_rng();
 
-            let xH_prime = x.into_ed25519() * *H_PRIME;
+            let xH = x.into_ed25519() * H;
 
             let (C_H_is, s_is) = x
                 .bits()
@@ -106,7 +106,7 @@ mod tests {
             let s = blinder_sum(s_is);
 
             assert!(verify_bit_commitments_represent_dleq_commitment(
-                &C_H_is, xH_prime, s
+                &C_H_is, xH, s
             ));
         }
     }
