@@ -12,9 +12,8 @@ use crate::{
     },
 };
 use bit_vec::BitVec;
-use ecdsa_fun::fun::marker::Jacobian;
 use ecdsa_fun::fun::{
-    marker::{NonZero, Normal},
+    marker::{Jacobian, NonZero, Normal},
     s,
 };
 use rand::{CryptoRng, RngCore};
@@ -23,21 +22,19 @@ use std::ops::{Add, Sub};
 
 /// A scalar that is valid for both secp256k1 and ed25519.
 ///
-/// Any valid scalar for ed25519 has the same bit representation for
-/// secp256k1, due to the smaller curve order for ed25519 compared to
-/// secp256k1.
+/// Any valid scalar for ed25519 has the same bit representation for secp256k1,
+/// due to the smaller curve order for ed25519 compared to secp256k1.
 ///
-/// On the other hand, not all valid scalars for secp256k1 have the
-/// same bit representation for ed25519.
+/// On the other hand, not all valid scalars for secp256k1 have the same bit
+/// representation for ed25519.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Scalar([u8; 32]);
 
 impl Scalar {
     /// Generate a random scalar.
     ///
-    /// To ensure that the scalar is valid and equal for both
-    /// secp256k1 and ed25519, we delegate to an `ed25519::Scalar`
-    /// API.
+    /// To ensure that the scalar is valid and equal for both secp256k1 and
+    /// ed25519, we delegate to an `ed25519::Scalar` API.
     pub fn random<R: RngCore + CryptoRng>(rng: &mut R) -> Self {
         let ed25519 = ed25519::Scalar::random(rng);
         let bytes = ed25519.to_bytes();
@@ -47,8 +44,8 @@ impl Scalar {
 
     /// Decompose scalar into bits.
     ///
-    /// The vector of bits is ordered from least significant bit to
-    /// most significant bit.
+    /// The vector of bits is ordered from least significant bit to most
+    /// significant bit.
     pub fn bits(&self) -> BitVec {
         // We reverse the vector of bits to ensure that the bits are
         // ordered from LSB to MSB.
@@ -66,8 +63,8 @@ impl Scalar {
 
 /// Implement addition for `Scalar`.
 ///
-/// We choose to rely on `secp256k1::Scalar` for this, but it should
-/// be equivalent to use `ed25519::Scalar` instead.
+/// We choose to rely on `secp256k1::Scalar` for this, but it should be
+/// equivalent to use `ed25519::Scalar` instead.
 impl Add<Scalar> for Scalar {
     type Output = Scalar;
     fn add(self, rhs: Scalar) -> Self::Output {
@@ -79,8 +76,8 @@ impl Add<Scalar> for Scalar {
 
 /// Implement subtraction for `Scalar`.
 ///
-/// We choose to rely on `secp256k1::Scalar` for this, but it should
-/// be equivalent to use `ed25519::Scalar` instead.
+/// We choose to rely on `secp256k1::Scalar` for this, but it should be
+/// equivalent to use `ed25519::Scalar` instead.
 impl Sub<Scalar> for Scalar {
     type Output = Scalar;
     fn sub(self, rhs: Scalar) -> Self::Output {
@@ -92,7 +89,8 @@ impl Sub<Scalar> for Scalar {
 
 // TODO: Consider introducing `Commitment` and `Blinder` types.
 
-/// Generate Pedersen Commitment to the value of a bit. Also return the blinder used.
+/// Generate Pedersen Commitment to the value of a bit. Also return the blinder
+/// used.
 pub trait Commit {
     type Commitment;
     type Blinder;
@@ -126,55 +124,47 @@ impl From<Scalar> for ed25519::Scalar {
 pub struct Proof {
     /// Pedersen Commitments for bits of the secp256k1 scalar.
     ///
-    /// Mathematical expression: `b_i * G_PRIME + r_i * G`, where
-    /// `b_i` is the `ith` bit, `r_i` is its blinder, and `G` and
-    /// `G_PRIME` are generators of secp256k1.
+    /// Mathematical expression: `b_i * G_PRIME + r_i * G`, where `b_i` is the
+    /// `ith` bit, `r_i` is its blinder, and `G` and `G_PRIME` are generators of
+    /// secp256k1.
     C_G_is: Vec<secp256k1::Point<Jacobian>>,
     /// Pedersen Commitments for bits of the ed25519 scalar.
     ///
-    /// Mathematical expression: `b_i * H_PRIME + s_i * H`, where
-    /// `b_i` is the `ith` bit, `s_i` is its blinder, and `H` and
-    /// `H_PRIME` are generators of secp256k1.
+    /// Mathematical expression: `b_i * H_PRIME + s_i * H`, where `b_i` is the
+    /// `ith` bit, `s_i` is its blinder, and `H` and `H_PRIME` are generators of
+    /// secp256k1.
     C_H_is: Vec<ed25519::Point>,
     /// Challenges for proofs that a bit is equal to 0.
     c_0s: Vec<Scalar>,
     /// Challenges for proofs that a bit is equal to 1.
     c_1s: Vec<Scalar>,
-    /// Announcements for proofs that a bit of the secp256k1 scalar is
-    /// equal to 0.
+    /// Announcements for proofs that a bit of the secp256k1 scalar is equal to
+    /// 0.
     U_G_0s: Vec<secp256k1::Point>,
-    /// Announcements for proofs that a bit of the ed25519 scalar is
-    /// equal to 0.
+    /// Announcements for proofs that a bit of the ed25519 scalar is equal to 0.
     U_H_0s: Vec<ed25519::Point>,
-    /// Announcements for proofs that a bit of the secp256k1 scalar is
-    /// equal to 1.
+    /// Announcements for proofs that a bit of the secp256k1 scalar is equal to
+    /// 1.
     U_G_1s: Vec<secp256k1::Point>,
-    /// Announcements for proofs that a bit of the ed25519 scalar is
-    /// equal to 0.
+    /// Announcements for proofs that a bit of the ed25519 scalar is equal to 0.
     U_H_1s: Vec<ed25519::Point>,
-    /// Responses for proofs that a bit of the secp256k1 scalar is
-    /// equal to 0.
+    /// Responses for proofs that a bit of the secp256k1 scalar is equal to 0.
     res_G_0s: Vec<secp256k1::Scalar>,
-    /// Responses for proofs that a bit of the ed25519 scalar is equal
-    /// to 0.
+    /// Responses for proofs that a bit of the ed25519 scalar is equal to 0.
     res_H_0s: Vec<ed25519::Scalar>,
-    /// Responses for proofs that a bit of the secp256k1 scalar is
-    /// equal to 1.
+    /// Responses for proofs that a bit of the secp256k1 scalar is equal to 1.
     res_G_1s: Vec<secp256k1::Scalar>,
-    /// Responses for proofs that a bit of the ed25519 scalar is equal
-    /// to 1.
+    /// Responses for proofs that a bit of the ed25519 scalar is equal to 1.
     res_H_1s: Vec<ed25519::Scalar>,
-    /// Blinder for the overall Pedersen Commitment of the secp256k1
-    /// scalar.
+    /// Blinder for the overall Pedersen Commitment of the secp256k1 scalar.
     ///
-    /// Calculation: sum of `r_i * 2^i`, where `i` is the index of the
-    /// bit and `r_i` its blinder.
+    /// Calculation: sum of `r_i * 2^i`, where `i` is the index of the bit and
+    /// `r_i` its blinder.
     r: secp256k1::Scalar,
-    /// Blinder for the overall Pedersen Commitment of the ed25519
-    /// scalar.
+    /// Blinder for the overall Pedersen Commitment of the ed25519 scalar.
     ///
-    /// Calculation: sum of `s_i * 2^i`, where `i` is the index of the
-    /// bit and `s_i` its blinder.
+    /// Calculation: sum of `s_i * 2^i`, where `i` is the index of the bit and
+    /// `s_i` its blinder.
     s: ed25519::Scalar,
 }
 
@@ -231,7 +221,8 @@ impl Proof {
             // Randomly generate responses for wrong bit w.r.t. secp256k1 and ed25519 groups
             let res_G_cheat = secp256k1::Scalar::random(rng);
             let res_H_cheat = ed25519::Scalar::random(rng);
-            // Build announcements using pre-generated challenge and response w.r.t secp256k1 and ed25519 groups
+            // Build announcements using pre-generated challenge and response w.r.t
+            // secp256k1 and ed25519 groups
             let U_G_cheat = {
                 let c_cheat = c_cheat.into_secp256k1();
                 g!(res_G_cheat * G - c_cheat * rG_prime)
