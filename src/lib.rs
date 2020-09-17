@@ -465,4 +465,22 @@ mod tests {
             assert!(proof.verify(&xG, xH).is_ok());
         }
     }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(10))]
+        #[test]
+        fn cross_group_dleq_proof_is_valid(
+            x in proptest::scalar(),
+            y in proptest::scalar(),
+        ) {
+            let mut rng = thread_rng();
+
+            let xG = g!({ x.into_secp256k1() } * G);
+            let xH = x.into_ed25519() * H;
+
+            let proof = Proof::new(&mut rng, &y);
+
+            assert!(proof.verify(&xG, xH).is_ok());
+        }
+    }
 }
