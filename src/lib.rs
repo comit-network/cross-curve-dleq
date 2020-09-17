@@ -449,28 +449,6 @@ mod tests {
         assert_eq!(ed25519_bytes, secp256k1_bytes);
     }
 
-    #[test]
-    fn decompose_scalar_into_bits_roundtrip() {
-        let x = Scalar::random(&mut thread_rng());
-
-        let mut X = secp256k1::Point::zero();
-        let two = U256::from(2u8);
-
-        for (i, b_i) in x.bits().iter().enumerate() {
-            if !b_i {
-                continue;
-            }
-
-            let exp = two.pow(U256::from(i));
-            let exp = secp256k1::Scalar::<Secret, Zero>::from_bytes(exp.into()).unwrap();
-
-            X = g!(X + exp * G).mark::<Normal>();
-        }
-
-        let x = secp256k1::Scalar::from(x);
-        assert_eq!(g!(x * G).mark::<Normal>(), X)
-    }
-
     proptest! {
         #![proptest_config(ProptestConfig::with_cases(10))]
         #[test]
