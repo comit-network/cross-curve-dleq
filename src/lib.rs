@@ -434,19 +434,21 @@ mod proptest {
 mod tests {
     use super::*;
     use ::proptest::prelude::*;
-    use bigint::U256;
-    use ecdsa_fun::fun::marker::Normal;
     use rand::thread_rng;
 
-    #[test]
-    fn secp256k1_key_from_ed25519_key_produces_same_bytes() {
-        let ed25519 = ed25519::Scalar::random(&mut thread_rng());
-        let ed25519_bytes = ed25519.to_bytes();
+    proptest! {
+        #[test]
+        fn secp256k1_key_from_ed25519_key_produces_same_bytes(
+            bytes in any::<[u8; 32]>(),
+        ) {
+            let ed25519 = ed25519::Scalar::from_bytes_mod_order(bytes);
+            let ed25519_bytes = ed25519.to_bytes();
 
-        let secp256k1 = secp256k1::Scalar::from_bytes_mod_order(ed25519_bytes);
-        let secp256k1_bytes = secp256k1.to_bytes();
+            let secp256k1 = secp256k1::Scalar::from_bytes_mod_order(ed25519_bytes);
+            let secp256k1_bytes = secp256k1.to_bytes();
 
-        assert_eq!(ed25519_bytes, secp256k1_bytes);
+            assert_eq!(ed25519_bytes, secp256k1_bytes);
+        }
     }
 
     proptest! {
