@@ -1,4 +1,10 @@
+use crate::Commit;
+
+use bigint::U256;
 pub use ecdsa_fun::fun::{g, marker, s, Point, Scalar, G};
+
+use marker::Jacobian;
+use marker::{Mark, NonZero, Secret, Zero};
 
 lazy_static::lazy_static! {
     /// Alternate generator of secp256k1.
@@ -7,4 +13,108 @@ lazy_static::lazy_static! {
             "0250929b74c1a04954b78b4b6035e97a5e078a5a0f28ec96d547bfee9ace803ac0"
         ))
         .expect("valid point");
+}
+
+pub struct PedersenCommitment(Point<Jacobian>);
+
+impl PedersenCommitment {
+    pub fn new<R: rand::RngCore + rand::CryptoRng>(
+        rng: &mut R,
+        x: &Scalar<Secret, Zero>,
+    ) -> (Self, Scalar) {
+        let r = Scalar::random(rng);
+        let commitment = g!(x * G_PRIME + r * G)
+            .mark::<NonZero>()
+            .expect("r to be non-zero");
+
+        (Self(commitment), r)
+    }
+}
+
+impl Commit for PedersenCommitment {
+    type Commitment = Point<Jacobian>;
+    type Blinder = Scalar;
+
+    fn commit<R: rand::RngCore + rand::CryptoRng>(
+        rng: &mut R,
+        bit: bool,
+    ) -> (Self::Commitment, Self::Blinder) {
+        let b = bit_as_scalar(bit);
+        let (PedersenCommitment(C_G), r) = PedersenCommitment::new(rng, &b);
+
+        (C_G, r)
+    }
+}
+
+pub fn bit_as_scalar(bit: bool) -> Scalar<Secret, Zero> {
+    if bit {
+        Scalar::one().mark::<Zero>()
+    } else {
+        Scalar::zero()
+    }
+}
+
+/// Calculate sum of `r_i * 2^i`, where `i` is the bit index.
+pub fn blinder_sum(r_is: &[Scalar]) -> Scalar {
+    let two = U256::from(2u8);
+    r_is.iter()
+        .enumerate()
+        .fold(Scalar::zero(), |acc, (i, r)| {
+            let exp = two.pow(U256::from(i));
+            let exp = Scalar::from_bytes(exp.into()).unwrap();
+
+            s!(acc + exp * r)
+        })
+        .mark::<NonZero>()
+        .expect("non-zero sum of blinders")
+}
+
+pub fn verify_bit_commitments_represent_dleq_commitment(
+    C_G_is: &[Point<Jacobian>],
+    xG_prime: &Point<Jacobian>,
+    r: &Scalar,
+) -> bool {
+    let two = U256::from(2u8);
+
+    let C_G =
+        C_G_is
+            .iter()
+            .enumerate()
+            .fold(Point::zero().mark::<Jacobian>(), |acc, (i, C_H_i)| {
+                let exp = two.pow(U256::from(i));
+                let exp = Scalar::from_bytes_mod_order(exp.into());
+
+                g!(acc + exp * C_H_i)
+            });
+
+    &g!(C_G - r * G) == xG_prime
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::proptest;
+    use ::proptest::prelude::*;
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(10))]
+        #[test]
+        fn bit_commitments_represent_dleq_commitment(x in proptest::scalar()) {
+            let mut rng = rand::thread_rng();
+
+            let xG_prime = g!({ x.into_secp256k1() } * G_PRIME);
+
+            let (C_G_is, r_is) = x
+                .bits()
+                .iter()
+                .map(|b| PedersenCommitment::commit(&mut rng, b))
+                .unzip::<_, _, Vec<_>, Vec<_>>();
+
+            let r = blinder_sum(&r_is);
+
+            assert!(verify_bit_commitments_represent_dleq_commitment(
+                &C_G_is, &xG_prime, &r
+            ));
+        }
+    }
 }
