@@ -1,7 +1,7 @@
 [package]
-name = "sigma"
+name = "cross-curve-dleq"
 version = "0.1.0"
-authors = ["Lucas Soriano del Pino <l.soriano.del.pino@gmail.com>"]
+authors = ["CoBloX Team <team@coblox.tech>"]
 edition = "2018"
 
 [dependencies]
