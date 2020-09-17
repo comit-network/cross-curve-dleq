@@ -522,7 +522,16 @@ mod tests {
     use super::*;
     use bigint::U256;
     use ecdsa_fun::fun::marker::Normal;
+    use proptest::prelude::*;
     use rand::thread_rng;
+
+    prop_compose! {
+        pub fn scalar()(
+            bytes in any::<[u8; 32]>(),
+        ) -> Scalar {
+            Scalar::from(bytes)
+        }
+    }
 
     #[test]
     fn secp256k1_key_from_ed25519_key_produces_same_bytes() {
@@ -557,39 +566,44 @@ mod tests {
         assert_eq!(g!(x * G).mark::<Normal>(), X)
     }
 
-    #[test]
-    fn bit_commitments_represent_dleq_commitments() {
-        let x = Scalar::random(&mut thread_rng());
-        let xG = g!({ x.into_secp256k1() } * G_PRIME);
-        let xH = x.into_ed25519() * *H_PRIME;
+    proptest::proptest! {
+        #![proptest_config(ProptestConfig::with_cases(10))]
+        #[test]
+        fn bit_commitments_represent_dleq_commitments(x in scalar()) {
+            let xG = g!({ x.into_secp256k1() } * G_PRIME);
+            let xH = x.into_ed25519() * *H_PRIME;
 
-        let bit_openings = x.bit_openings(&mut thread_rng());
-        let bit_commitments = bit_openings
-            .iter()
-            .map(|(secp256k1, ed25519)| (secp256k1.commit(), ed25519.commit()))
-            .collect();
+            let bit_openings = x.bit_openings(&mut thread_rng());
+            let bit_commitments = bit_openings
+                .iter()
+                .map(|(secp256k1, ed25519)| (secp256k1.commit(), ed25519.commit()))
+                .collect();
 
-        let blinder_sums = blinder_sums(bit_openings);
+            let blinder_sums = blinder_sums(bit_openings);
 
-        assert!(verify_bit_commitments_represent_dleq_commitments(
-            bit_commitments,
-            blinder_sums,
-            (xG, xH),
-        ));
+            assert!(verify_bit_commitments_represent_dleq_commitments(
+                bit_commitments,
+                blinder_sums,
+                (xG, xH),
+            ));
+        }
     }
 
-    #[test]
-    fn cross_group_dleq_proof_is_valid() {
-        let x = Scalar::random(&mut thread_rng());
+    proptest::proptest! {
+        #![proptest_config(ProptestConfig::with_cases(10))]
+        #[test]
+        fn cross_group_dleq_proof_is_valid(
+            x in scalar(),
+        ) {
+            let bit_openings = x.bit_openings(&mut thread_rng());
+            let bit_commitments = bit_openings
+                .iter()
+                .map(|(secp256k1, ed25519)| (secp256k1.commit(), ed25519.commit()))
+                .collect();
 
-        let bit_openings = x.bit_openings(&mut thread_rng());
-        let bit_commitments = bit_openings
-            .iter()
-            .map(|(secp256k1, ed25519)| (secp256k1.commit(), ed25519.commit()))
-            .collect();
+            let proof = cross_group_dleq_prove(&mut thread_rng(), bit_openings);
 
-        let proof = cross_group_dleq_prove(&mut thread_rng(), bit_openings);
-
-        assert!(verify_cross_group_dleq_proof(bit_commitments, proof).is_ok());
+            assert!(verify_cross_group_dleq_proof(bit_commitments, proof).is_ok());
+        }
     }
 }
