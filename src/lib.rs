@@ -470,10 +470,15 @@ impl Proof {
     }
 }
 
+#[derive(Debug, thiserror::Error)]
 pub enum Error {
+    #[error("sum of bitwise split challenges not equal to total challenge: c_0 + c_1 != c")]
     ChallengeSum,
+    #[error("bitwise response did not satisfy challenge")]
     ResponseVerification,
+    #[error("combination of bitwise secp256k1 pedersen commitments not equal to public value")]
     Secp256k1BitCommitmentRepresentation,
+    #[error("combination of bitwise ed25519 pedersen commitments not equal to public value")]
     Ed25519BitCommitmentRepresentation,
 }
 
