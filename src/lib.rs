@@ -121,6 +121,8 @@ impl From<Scalar> for ed25519::Scalar {
     }
 }
 
+/// Non-interactive zero-knowledge proof of knowledge of the same discrete
+/// logarithm across secp256k1 and ed25519.
 pub struct Proof {
     /// Pedersen Commitments for bits of the secp256k1 scalar.
     ///
@@ -156,12 +158,12 @@ pub struct Proof {
     res_G_1s: Vec<secp256k1::Scalar>,
     /// Responses for proofs that a bit of the ed25519 scalar is equal to 1.
     res_H_1s: Vec<ed25519::Scalar>,
-    /// Blinder for the overall Pedersen Commitment of the secp256k1 scalar.
+    /// Blinder for the "overall" Pedersen Commitment of the secp256k1 scalar.
     ///
     /// Calculation: sum of `r_i * 2^i`, where `i` is the index of the bit and
     /// `r_i` its blinder.
     r: secp256k1::Scalar,
-    /// Blinder for the overall Pedersen Commitment of the ed25519 scalar.
+    /// Blinder for the "overall" Pedersen Commitment of the ed25519 scalar.
     ///
     /// Calculation: sum of `s_i * 2^i`, where `i` is the index of the bit and
     /// `s_i` its blinder.
@@ -169,6 +171,41 @@ pub struct Proof {
 }
 
 impl Proof {
+    /// Prove knowledge of `witness` across secp256k1 and ed25519. In other
+    /// words, prove knowledge of the value of `witness`, whilst also proving
+    /// that it has an equivalent representation on secp256k1 and ed25519.
+    ///
+    /// # High-level strategy
+    ///
+    /// 1. Decompose `witness` into bits.
+    /// 2. For each bit, generate a Pedersen Commitment of the form
+    /// `C_G_i = bit_i * G + r_i * G_PRIME`, where `r_i` is a blinder, and `G`
+    /// and `G_PRIME` are generators of secp256k1.
+    /// 3. For each bit, also generate a Pedersen Commitment of the form
+    /// `C_H_i = bit * H + s_i * H_PRIME`, where `s_i` is a blinder, and `H` and
+    /// `H_PRIME` are generators of ed25519.
+    /// 4. Leveraging the [_composition of Sigma-protocols_], for every bit
+    /// prove knowledge of
+    ///
+    /// - the discrete logarithm w.r.t. `G_PRIME` of `C_G_i` AND the discrete
+    ///   logarithm w.r.t `H_PRIME` of `C_H_i`; OR
+    /// - the discrete logarithm w.r.t. `G_PRIME` of `C_G_i - G` AND the
+    ///   discrete logarithm w.r.t `H_PRIME` of `C_H_i - H`.
+    ///
+    /// This proves that each bit is the same, that each Pedersen Commitment is
+    /// to either 0 or 1, and knowledge of the corresponding blinders (`r_i` and
+    /// `s_i`) for each bit.
+    ///
+    /// 5. Prove that the sum of all `C_G_i * 2^i` minus `r * G_PRIME` is equal
+    /// to the public value `witness * G`, and that the sum of all `C_H_i * 2^i`
+    /// minus `s * H_PRIME` is equal to the public value `witness * H`.
+    ///
+    /// To this end, the proof contains `r` equal to the sum `r_i * 2^i` for all
+    /// `i` and the `s` equal to the sum `s_i * 2^i` for all `i`. The verifier
+    /// will simply operate as indicated above and verify that the equalities
+    /// hold.
+    ///
+    /// [_composition of Sigma-protocols_]: https://www.win.tue.nl/~berry/CryptographicProtocols/LectureNotes.pdf
     pub fn new<R: RngCore + CryptoRng>(rng: &mut R, witness: &Scalar) -> Proof {
         let bits = witness.bits();
 
@@ -191,11 +228,11 @@ impl Proof {
         let mut res_H_1s = Vec::new();
 
         for b in bits.iter() {
-            // Compute commitment corresponding to each opening
+            // compute commitment corresponding to each opening
             let (C_G, r) = secp256k1::PedersenCommitment::commit(rng, b);
             let (C_H, s) = ed25519::PedersenCommitment::commit(rng, b);
 
-            // We prove knowledge of the discrete log of C_{G,H} - b{G_PRIME,H_PRIME} with
+            // we prove knowledge of the discrete log of C_{G,H} - b{G_PRIME,H_PRIME} with
             // respect to {G,H}, proving that it was in fact a commitment to b and proving
             // knowledge of the blinder {r,s}
             let rG_prime = {
@@ -207,20 +244,20 @@ impl Proof {
                 C_H - b * H
             };
 
-            // Generate randomness for actual bit w.r.t. secp256k1 and ed25519 groups
+            // generate randomness for actual bit w.r.t. secp256k1 and ed25519 groups
             let u_G = secp256k1::Scalar::random(rng);
             let u_H = ed25519::Scalar::random(rng);
-            // Compute announcement for actual bit w.r.t. secp256k1 and ed25519 groups
+            // compute announcement for actual bit w.r.t. secp256k1 and ed25519 groups
             let U_G = g!(u_G * G_PRIME).mark::<Normal>();
             let U_H = u_H * *H_PRIME;
 
-            // Randomly generate challenge for the wrong bit
+            // randomly generate challenge for the wrong bit
             let c_cheat = Scalar::random(rng);
 
-            // Randomly generate responses for wrong bit w.r.t. secp256k1 and ed25519 groups
+            // randomly generate responses for wrong bit w.r.t. secp256k1 and ed25519 groups
             let res_G_cheat = secp256k1::Scalar::random(rng);
             let res_H_cheat = ed25519::Scalar::random(rng);
-            // Build announcements using pre-generated challenge and response w.r.t
+            // build announcements using pre-generated challenge and response w.r.t
             // secp256k1 and ed25519 groups
             let U_G_cheat = {
                 let c_cheat = c_cheat.into_secp256k1();
@@ -243,6 +280,8 @@ impl Proof {
             c_cheats.push(c_cheat);
 
             if b {
+                // if the the actual value of the bit is 1, we cheat on the announcement and
+                // response for the proof that proves that the value of the bit is 0
                 U_G_0s.push(U_G_cheat);
                 U_H_0s.push(U_H_cheat);
                 res_G_0s.push(res_G_cheat);
@@ -258,6 +297,8 @@ impl Proof {
                 res_G_0s.push(u_G);
                 res_H_0s.push(u_H);
 
+                // if the the actual value of the bit is 0, we cheat on the announcement and
+                // response for the proof that proves that the value of the bit is 1
                 U_G_1s.push(U_G_cheat);
                 U_H_1s.push(U_H_cheat);
                 res_G_1s.push(res_G_cheat);
@@ -265,6 +306,10 @@ impl Proof {
             }
         }
 
+        // produce challenge by hashing all the announcements and all the statements
+        // (the bitwise Pedersen Commitments). This challenge will then be split by us,
+        // the prover, allowing us to "cheat" on one of the proofs per bit i.e. the
+        // wrong bit for which we randomly generated the challenge above
         let c = Self::compute_challenge(
             &C_G_is
                 .clone()
@@ -284,8 +329,10 @@ impl Proof {
         for (i, b) in bits.iter().enumerate() {
             if b {
                 let c_0 = c_cheats[i];
+                // compute challenge for the actual bit
                 let c_1 = c - c_0;
 
+                // since we don't control `c_1` the response for these proofs will be legitimate
                 res_G_1s[i] = s!({ &res_G_1s[i] } + { c_1.into_secp256k1() } * { &r_is[i] })
                     .mark::<NonZero>()
                     .expect("non-zero response");
@@ -295,8 +342,10 @@ impl Proof {
                 c_1s.push(c_1);
             } else {
                 let c_1 = c_cheats[i];
+                // compute challenge for the actual bit
                 let c_0 = c - c_1;
 
+                // since we don't control `c_0` the response for these proofs will be legitimate
                 res_G_0s[i] = s!({ &res_G_0s[i] } + { c_0.into_secp256k1() } * { &r_is[i] })
                     .mark::<NonZero>()
                     .expect("non-zero response");
@@ -307,7 +356,9 @@ impl Proof {
             };
         }
 
+        // sum of `r_i * 2^i` for all `i`
         let r = secp256k1::blinder_sum(&r_is);
+        // sum of `s_i * 2^i` for all `i`
         let s = ed25519::blinder_sum(s_is);
 
         Proof {
@@ -328,6 +379,8 @@ impl Proof {
         }
     }
 
+    /// Compute challenge by hashing the statements (Pedersen Commitments) and
+    /// announcements for each bitwise proof.
     pub fn compute_challenge(
         C_G_is: &[secp256k1::Point],
         C_H_is: &[ed25519::Point],
@@ -355,6 +408,14 @@ impl Proof {
         Scalar::from(bytes)
     }
 
+    /// Verify the proof.
+    ///
+    /// In particular:
+    ///
+    /// 1. Ensure that the combinations of Pedersen Commitments actually
+    /// represent the public values `xG` and `xH`.
+    /// 2. Ensure that each bitwise response satisfies its corresponding
+    /// challenge.
     pub fn verify(&self, xG: &secp256k1::Point<Jacobian>, xH: ed25519::Point) -> Result<(), Error> {
         if !secp256k1::verify_bit_commitments_represent_dleq_commitment(&self.C_G_is, xG, &self.r) {
             return Err(Error::Secp256k1BitCommitmentRepresentation);
@@ -469,7 +530,7 @@ mod tests {
     proptest! {
         #![proptest_config(ProptestConfig::with_cases(10))]
         #[test]
-        fn cross_group_dleq_proof_is_valid(
+        fn cross_group_dleq_proof_for_wrong_scalar_is_invalid(
             x in proptest::scalar(),
             y in proptest::scalar(),
         ) {
@@ -480,7 +541,7 @@ mod tests {
 
             let proof = Proof::new(&mut rng, &y);
 
-            assert!(proof.verify(&xG, xH).is_ok());
+            assert!(proof.verify(&xG, xH).is_err());
         }
     }
 }

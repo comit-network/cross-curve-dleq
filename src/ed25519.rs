@@ -20,6 +20,7 @@ lazy_static::lazy_static! {
 pub struct PedersenCommitment(Point);
 
 impl PedersenCommitment {
+    /// Generate a Pedersen Commitment for the scalar `x`.
     pub fn new<R: rand::RngCore + rand::CryptoRng>(rng: &mut R, x: Scalar) -> (Self, Scalar) {
         let s = Scalar::random(rng);
         let C_H = x * H + s * *H_PRIME;
@@ -43,6 +44,7 @@ impl Commit for PedersenCommitment {
     }
 }
 
+/// Transform a bit into a `ed25519::Scalar`.
 pub fn bit_as_scalar(bit: bool) -> Scalar {
     if bit {
         Scalar::one()
@@ -62,6 +64,8 @@ pub fn blinder_sum(s_is: Vec<Scalar>) -> Scalar {
     })
 }
 
+/// Check that the sum of `C_H_i * 2^i` minus `s * H_PRIME` is equal to the
+/// public value `xH` for all `C_H_i` in `C_H_is`.
 pub fn verify_bit_commitments_represent_dleq_commitment(
     C_H_is: &[Point],
     xH: Point,

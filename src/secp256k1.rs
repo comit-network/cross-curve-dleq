@@ -17,6 +17,7 @@ lazy_static::lazy_static! {
 pub struct PedersenCommitment(Point<Jacobian>);
 
 impl PedersenCommitment {
+    /// Generate a Pedersen Commitment for the scalar `x`.
     pub fn new<R: rand::RngCore + rand::CryptoRng>(
         rng: &mut R,
         x: &Scalar<Secret, Zero>,
@@ -45,6 +46,7 @@ impl Commit for PedersenCommitment {
     }
 }
 
+/// Transform a bit into a `secp256k1::Scalar`.
 pub fn bit_as_scalar(bit: bool) -> Scalar<Secret, Zero> {
     if bit {
         Scalar::one().mark::<Zero>()
@@ -68,6 +70,8 @@ pub fn blinder_sum(r_is: &[Scalar]) -> Scalar {
         .expect("non-zero sum of blinders")
 }
 
+/// Check that the sum of `C_G_i * 2^i` minus `r * G_PRIME` is equal to the
+/// public value `xG` for all `C_G_i` in `C_G_is`.
 pub fn verify_bit_commitments_represent_dleq_commitment(
     C_G_is: &[Point<Jacobian>],
     xG: &Point<Jacobian>,
@@ -79,11 +83,11 @@ pub fn verify_bit_commitments_represent_dleq_commitment(
         C_G_is
             .iter()
             .enumerate()
-            .fold(Point::zero().mark::<Jacobian>(), |acc, (i, C_H_i)| {
+            .fold(Point::zero().mark::<Jacobian>(), |acc, (i, C_G_i)| {
                 let exp = two.pow(U256::from(i));
                 let exp = Scalar::from_bytes_mod_order(exp.into());
 
-                g!(acc + exp * C_H_i)
+                g!(acc + exp * C_G_i)
             });
 
     &g!(C_G - r * G_PRIME) == xG
