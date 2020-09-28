@@ -8,6 +8,9 @@ pub type Point = EdwardsPoint;
 
 lazy_static::lazy_static! {
     /// Alternate generator of ed25519.
+    ///
+    /// Obtained by hashing `curve25519_dalek::constants::ED25519_BASEPOINT_POINT`.
+    /// Originally used in Monero Ring Confidential Transactions.
     pub static ref H_PRIME: EdwardsPoint = {
         CompressedEdwardsY(hex_literal::hex!(
             "8b655970153799af2aeadc9ff1add0ea6c7251d54154cfa92c173a0dd39c1f94"
