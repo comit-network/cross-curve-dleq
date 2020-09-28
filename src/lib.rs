@@ -417,8 +417,16 @@ impl Proof {
     /// represent the public values `xG` and `xH`.
     /// 2. Ensure that each bitwise response satisfies its corresponding
     /// challenge.
-    pub fn verify(&self, xG: &secp256k1::Point<Jacobian>, xH: ed25519::Point) -> Result<(), Error> {
-        if !secp256k1::verify_bit_commitments_represent_dleq_commitment(&self.C_G_is, xG, &self.r) {
+    pub fn verify(
+        &self,
+        xG: secp256k1::Point<impl secp256k1::PointType>,
+        xH: ed25519::Point,
+    ) -> Result<(), Error> {
+        if !secp256k1::verify_bit_commitments_represent_dleq_commitment(
+            &self.C_G_is,
+            &xG.mark::<Jacobian>(),
+            &self.r,
+        ) {
             return Err(Error::Secp256k1BitCommitmentRepresentation);
         }
 
@@ -529,7 +537,7 @@ mod tests {
 
             let proof = Proof::new(&mut thread_rng(), &x);
 
-            assert!(proof.verify(&xG, xH).is_ok());
+            assert!(proof.verify(xG, xH).is_ok());
         }
     }
 
@@ -547,7 +555,7 @@ mod tests {
 
             let proof = Proof::new(&mut rng, &y);
 
-            assert!(proof.verify(&xG, xH).is_err());
+            assert!(proof.verify(xG, xH).is_err());
         }
     }
 }

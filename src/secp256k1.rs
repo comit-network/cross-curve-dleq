@@ -1,9 +1,8 @@
 use crate::Commit;
-
 use bigint::U256;
-pub use ecdsa_fun::fun::{g, marker, s, Point, Scalar, G};
+use ecdsa_fun::fun::marker::{Jacobian, Mark, NonZero, Secret, Zero};
 
-use marker::{Jacobian, Mark, NonZero, Secret, Zero};
+pub use ecdsa_fun::fun::{g, marker, marker::PointType, s, Point, Scalar, G};
 
 lazy_static::lazy_static! {
     /// Alternate generator of secp256k1.
