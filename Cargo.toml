@@ -8,7 +8,7 @@ edition = "2018"
 bigint = "4"
 bit-vec = "0.6"
 curve25519-dalek = "2"
-ecdsa_fun = { git = "https://github.com/LLFourn/secp256kfun", features = ["libsecp_compat"], rev = "471d15ee1dade4baf459e1ed75ed53117bdb9270" }
+ecdsa_fun = { version = "0.3.1", features = ["libsecp_compat"] }
 hex-literal = "0.2"
 lazy_static = "1.4"
 rand = "0.7"
