@@ -63,26 +63,20 @@ impl Scalar {
 }
 
 /// Implement addition for `Scalar`.
-///
-/// We choose to rely on `secp256k1::Scalar` for this, but it should be
-/// equivalent to use `ed25519::Scalar` instead.
 impl Add<Scalar> for Scalar {
     type Output = Scalar;
     fn add(self, rhs: Scalar) -> Self::Output {
-        let res = s!({ self.into_secp256k1() } + { rhs.into_secp256k1() });
+        let res = self.into_ed25519() + rhs.into_ed25519();
 
         Scalar(res.to_bytes())
     }
 }
 
 /// Implement subtraction for `Scalar`.
-///
-/// We choose to rely on `secp256k1::Scalar` for this, but it should be
-/// equivalent to use `ed25519::Scalar` instead.
 impl Sub<Scalar> for Scalar {
     type Output = Scalar;
     fn sub(self, rhs: Scalar) -> Self::Output {
-        let res = s!({ self.into_secp256k1() } - { rhs.into_secp256k1() });
+        let res = self.into_ed25519() - rhs.into_ed25519();
 
         Scalar(res.to_bytes())
     }
