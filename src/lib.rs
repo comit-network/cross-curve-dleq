@@ -243,7 +243,7 @@ impl Proof {
             };
             let sH_prime = {
                 let b = ed25519::bit_as_scalar(!b);
-                C_H - b * H
+                C_H - &H * &b
             };
 
             // generate randomness for actual bit w.r.t. secp256k1 and ed25519 groups
@@ -465,7 +465,7 @@ impl Proof {
             if g!(res_G_0 * G_PRIME) != g!(U_G_0 + { c_0.into_secp256k1() } * C_G_i)
                 || g!(res_G_1 * G_PRIME) != g!(U_G_1 + { c_1.into_secp256k1() } * (C_G_i - G))
                 || res_H_0 * *H_PRIME != U_H_0 + c_0.into_ed25519() * C_H_i
-                || res_H_1 * *H_PRIME != U_H_1 + c_1.into_ed25519() * (C_H_i - H)
+                || res_H_1 * *H_PRIME != U_H_1 + c_1.into_ed25519() * (C_H_i - H.basepoint())
             {
                 return Err(Error::ResponseVerification);
             }
@@ -523,13 +523,13 @@ mod tests {
     }
 
     proptest! {
-        #![proptest_config(ProptestConfig::with_cases(10))]
+        #![proptest_config(ProptestConfig::with_cases(1))]
         #[test]
         fn cross_group_dleq_proof_is_valid(
             x in proptest::scalar(),
         ) {
             let xG = g!({ x.into_secp256k1() } * G);
-            let xH = x.into_ed25519() * H;
+            let xH = &x.into_ed25519() * &H;
 
             let proof = Proof::new(&mut thread_rng(), &x);
 
@@ -547,7 +547,7 @@ mod tests {
             let mut rng = thread_rng();
 
             let xG = g!({ x.into_secp256k1() } * G);
-            let xH = x.into_ed25519() * H;
+            let xH = &x.into_ed25519() * &H;
 
             let proof = Proof::new(&mut rng, &y);
 
