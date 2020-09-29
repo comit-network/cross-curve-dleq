@@ -59,14 +59,12 @@ pub fn bit_as_scalar(bit: bool) -> Scalar {
 /// Calculate sum of `r * 2^i`, where `i` is the bit index.
 pub fn blinder_sum(s_is: &[Scalar]) -> Scalar {
     let two = U256::from(2u8);
-    s_is.into_iter()
-        .enumerate()
-        .fold(Scalar::zero(), |acc, (i, s)| {
-            let exp = two.pow(U256::from(i));
-            let exp = Scalar::from_bytes_mod_order(exp.into());
+    s_is.iter().enumerate().fold(Scalar::zero(), |acc, (i, s)| {
+        let exp = two.pow(U256::from(i));
+        let exp = Scalar::from_bytes_mod_order(exp.into());
 
-            acc + exp * s
-        })
+        acc + exp * s
+    })
 }
 
 /// Check that the sum of `C_H_i * 2^i` minus `s * H_PRIME` is equal to the
