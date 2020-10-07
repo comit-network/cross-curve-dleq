@@ -103,7 +103,7 @@ mod tests {
     proptest! {
         #![proptest_config(ProptestConfig::with_cases(10))]
         #[test]
-        fn bit_commitments_represent_dleq_commitment(x in proptest::scalar()) {
+        fn secp_bit_commitments_represent_dleq_commitment(x in proptest::scalar()) {
             let mut rng = rand::thread_rng();
 
             let xG = g!({ x.into_secp256k1() } * G);

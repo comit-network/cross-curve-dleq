@@ -5,7 +5,6 @@ authors = ["CoBloX Team <team@coblox.tech>"]
 edition = "2018"
 
 [dependencies]
-bigint = "4"
 bit-vec = "0.6"
 generic-array = "0.14"
 curve25519-dalek = "2"

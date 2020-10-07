@@ -16,12 +16,16 @@ use ecdsa_fun::fun::{
     marker::{Jacobian, NonZero, Normal},
     s,
 };
-use generic_array::{typenum::consts::U256, GenericArray};
-use rand::{CryptoRng, RngCore};
+use generic_array::{
+    typenum::consts::{U252, U31, U32},
+    GenericArray,
+};
+use rand::{CryptoRng, Rng, RngCore};
 use sha2::{Digest, Sha256};
 use std::ops::{Add, Sub};
 
-/// A scalar that is valid for both secp256k1 and ed25519.
+/// A scalar that has the same bit representation for both ed25519 and
+/// secp256k1.
 ///
 /// Any valid scalar for ed25519 has the same bit representation for secp256k1,
 /// due to the smaller curve order for ed25519 compared to secp256k1. On the
@@ -31,38 +35,44 @@ use std::ops::{Add, Sub};
 /// Since the order of ed25519 is equal to 2^252 +
 /// 0x14def9dea2f79cd65812631a5cf5d3ed, for simplicity we only support 252 bit
 /// scalars.
+///
+/// The underlying array of bytes has a little-endian encoding.
 #[derive(Default, Debug, Clone, Copy, PartialEq)]
 pub struct Scalar([u8; 32]);
 
 impl Scalar {
     /// Generate a random 252 bit scalar.
     pub fn random<R: RngCore + CryptoRng>(rng: &mut R) -> Self {
-        let mut bytes = [0u8; 32];
+        // the first 246 bits can be completely random
+        let mut lsbs = [0u8; 31];
+        rng.fill_bytes(&mut lsbs);
 
-        // try until the scalar generated is no larger than 2^253 - 1
-        loop {
-            rng.fill_bytes(&mut bytes);
+        // the value of the last 8 bits must be < 16, so that the number can be
+        // expressed in a maximum of 252 bits
+        let msb = rng.gen_range(0, 15u8);
 
-            // if the most significant bit of the scalar is greater than 31,
-            // the scalar is larger than 2^253 - 1 and we must try again
-            if bytes[31] > 31 {
-                continue;
-            }
+        let bytes = lsbs
+            .iter()
+            .copied()
+            .chain(std::iter::once(msb))
+            .collect::<GenericArray<u8, U32>>();
 
-            break;
-        }
-
-        Self(bytes)
+        Self(bytes.into())
     }
 
-    /// Decompose scalar into bits.
-    ///
-    /// The vector of bits is ordered from least significant bit to most
-    /// significant bit.
+    /// Decompose scalar into a vector of bits with little-endian encoding.
     pub fn bits(&self) -> BitVec {
-        // We reverse the vector of bits to ensure that the bits are
-        // ordered from LSB to MSB.
-        BitVec::from_bytes(&self.0).iter().rev().collect()
+        let mut bytes = self.0;
+
+        // `BitVec::from_bytes` expects the bytes that it takes in as an argument to be
+        // big-endian
+        bytes.reverse();
+
+        // in order to produce a little-endian encoded vector of bits, we reverse the
+        // vector
+        let bits: BitVec = BitVec::from_bytes(&bytes).iter().rev().collect();
+
+        bits.iter().take(252).collect()
     }
 
     pub fn into_secp256k1(self) -> secp256k1::Scalar {
@@ -107,16 +117,16 @@ pub trait Commit {
 #[derive(Debug, Clone, Copy)]
 pub struct BitCommitment<P>(P);
 
-impl From<[u8; 32]> for Scalar {
-    fn from(from: [u8; 32]) -> Self {
-        let scalar = ed25519::Scalar::from_bytes_mod_order(from);
-        Self(*scalar.as_bytes())
-    }
-}
-
 impl From<Scalar> for secp256k1::Scalar {
     fn from(from: Scalar) -> Self {
-        secp256k1::Scalar::<Secret, Zero>::from_bytes_mod_order(from.0)
+        let mut bytes = from.0;
+
+        // `Scalar`s are little-endian and `secp256k1::Scalar`s are big-endian,
+        // so we reverse the bytes
+        bytes.reverse();
+
+        secp256k1::Scalar::<Secret, Zero>::from_bytes(bytes)
+            .expect("cannot overflow since Scalars are 252 bits long")
             .mark::<NonZero>()
             .expect("non-zero scalar")
     }
@@ -124,7 +134,7 @@ impl From<Scalar> for secp256k1::Scalar {
 
 impl From<Scalar> for ed25519::Scalar {
     fn from(from: Scalar) -> Self {
-        Self::from_bytes_mod_order(from.0)
+        ed25519::Scalar::from_bits(from.0)
     }
 }
 
@@ -137,35 +147,35 @@ pub struct Proof {
     /// Mathematical expression: `b_i * G + r_i * G_PRIME`, where `b_i` is the
     /// `ith` bit, `r_i` is its blinder, and `G` and `G_PRIME` are generators of
     /// secp256k1.
-    C_G_is: GenericArray<secp256k1::Point<Jacobian>, U256>,
+    C_G_is: GenericArray<secp256k1::Point<Jacobian>, U252>,
     /// Pedersen Commitments for bits of the ed25519 scalar.
     ///
     /// Mathematical expression: `b_i * H + s_i * H_PRIME`, where `b_i` is the
     /// `ith` bit, `s_i` is its blinder, and `H` and `H_PRIME` are generators of
     /// secp256k1.
-    C_H_is: GenericArray<ed25519::Point, U256>,
+    C_H_is: GenericArray<ed25519::Point, U252>,
     /// Challenges for proofs that a bit is equal to 0.
-    c_0s: GenericArray<Scalar, U256>,
+    c_0s: GenericArray<Challenge, U252>,
     /// Challenges for proofs that a bit is equal to 1.
-    c_1s: GenericArray<Scalar, U256>,
+    c_1s: GenericArray<Challenge, U252>,
     /// Announcements for proofs that a bit of the secp256k1 scalar is equal to
     /// 0.
-    U_G_0s: GenericArray<secp256k1::Point, U256>,
+    U_G_0s: GenericArray<secp256k1::Point, U252>,
     /// Announcements for proofs that a bit of the ed25519 scalar is equal to 0.
-    U_H_0s: GenericArray<ed25519::Point, U256>,
+    U_H_0s: GenericArray<ed25519::Point, U252>,
     /// Announcements for proofs that a bit of the secp256k1 scalar is equal to
     /// 1.
-    U_G_1s: GenericArray<secp256k1::Point, U256>,
+    U_G_1s: GenericArray<secp256k1::Point, U252>,
     /// Announcements for proofs that a bit of the ed25519 scalar is equal to 0.
-    U_H_1s: GenericArray<ed25519::Point, U256>,
+    U_H_1s: GenericArray<ed25519::Point, U252>,
     /// Responses for proofs that a bit of the secp256k1 scalar is equal to 0.
-    res_G_0s: GenericArray<secp256k1::Scalar, U256>,
+    res_G_0s: GenericArray<secp256k1::Scalar, U252>,
     /// Responses for proofs that a bit of the ed25519 scalar is equal to 0.
-    res_H_0s: GenericArray<ed25519::Scalar, U256>,
+    res_H_0s: GenericArray<ed25519::Scalar, U252>,
     /// Responses for proofs that a bit of the secp256k1 scalar is equal to 1.
-    res_G_1s: GenericArray<secp256k1::Scalar, U256>,
+    res_G_1s: GenericArray<secp256k1::Scalar, U252>,
     /// Responses for proofs that a bit of the ed25519 scalar is equal to 1.
-    res_H_1s: GenericArray<ed25519::Scalar, U256>,
+    res_H_1s: GenericArray<ed25519::Scalar, U252>,
     /// Blinder for the "overall" Pedersen Commitment of the secp256k1 scalar.
     ///
     /// Calculation: sum of `r_i * 2^i`, where `i` is the index of the bit and
@@ -217,23 +227,23 @@ impl Proof {
     pub fn new<R: RngCore + CryptoRng>(rng: &mut R, witness: &Scalar) -> Proof {
         let bits = witness.bits();
 
-        let mut C_G_is = GenericArray::<secp256k1::Point<Jacobian>, U256>::default();
-        let mut r_is = GenericArray::<secp256k1::Scalar, U256>::default();
+        let mut C_G_is = GenericArray::<secp256k1::Point<Jacobian>, U252>::default();
+        let mut r_is = GenericArray::<secp256k1::Scalar, U252>::default();
 
-        let mut C_H_is = GenericArray::<ed25519::Point, U256>::default();
-        let mut s_is = GenericArray::<ed25519::Scalar, U256>::default();
+        let mut C_H_is = GenericArray::<ed25519::Point, U252>::default();
+        let mut s_is = GenericArray::<ed25519::Scalar, U252>::default();
 
-        let mut c_cheats = GenericArray::<Scalar, U256>::default();
+        let mut c_cheats = GenericArray::<Challenge, U252>::default();
 
-        let mut U_G_0s = GenericArray::<secp256k1::Point, U256>::default();
-        let mut U_H_0s = GenericArray::<ed25519::Point, U256>::default();
-        let mut U_G_1s = GenericArray::<secp256k1::Point, U256>::default();
-        let mut U_H_1s = GenericArray::<ed25519::Point, U256>::default();
+        let mut U_G_0s = GenericArray::<secp256k1::Point, U252>::default();
+        let mut U_H_0s = GenericArray::<ed25519::Point, U252>::default();
+        let mut U_G_1s = GenericArray::<secp256k1::Point, U252>::default();
+        let mut U_H_1s = GenericArray::<ed25519::Point, U252>::default();
 
-        let mut res_G_0s = GenericArray::<secp256k1::Scalar, U256>::default();
-        let mut res_H_0s = GenericArray::<ed25519::Scalar, U256>::default();
-        let mut res_G_1s = GenericArray::<secp256k1::Scalar, U256>::default();
-        let mut res_H_1s = GenericArray::<ed25519::Scalar, U256>::default();
+        let mut res_G_0s = GenericArray::<secp256k1::Scalar, U252>::default();
+        let mut res_H_0s = GenericArray::<ed25519::Scalar, U252>::default();
+        let mut res_G_1s = GenericArray::<secp256k1::Scalar, U252>::default();
+        let mut res_H_1s = GenericArray::<ed25519::Scalar, U252>::default();
 
         for (i, b) in bits.iter().enumerate() {
             // compute commitment corresponding to each opening
@@ -260,7 +270,7 @@ impl Proof {
             let U_H = u_H * *H_PRIME;
 
             // randomly generate challenge for the wrong bit
-            let c_cheat = Scalar::random(rng);
+            let c_cheat = Challenge::random(rng);
 
             // randomly generate responses for wrong bit w.r.t. secp256k1 and ed25519 groups
             let res_G_cheat = secp256k1::Scalar::random(rng);
@@ -331,8 +341,8 @@ impl Proof {
             &U_H_1s,
         );
 
-        let mut c_0s = GenericArray::<Scalar, U256>::default();
-        let mut c_1s = GenericArray::<Scalar, U256>::default();
+        let mut c_0s = GenericArray::<Challenge, U252>::default();
+        let mut c_1s = GenericArray::<Challenge, U252>::default();
 
         for (i, b) in bits.iter().enumerate() {
             if b {
@@ -396,7 +406,7 @@ impl Proof {
         U_G_1s: &[secp256k1::Point],
         U_H_0s: &[ed25519::Point],
         U_H_1s: &[ed25519::Point],
-    ) -> Scalar {
+    ) -> Challenge {
         let mut hasher = Sha256::default();
 
         for (i, (C_G_i, C_H_i)) in C_G_is.iter().zip(C_H_is.iter()).enumerate() {
@@ -410,10 +420,10 @@ impl Proof {
 
         let hash = hasher.finalize();
 
-        let mut bytes = [0u8; 32];
-        bytes.copy_from_slice(hash.as_slice());
+        let mut bytes = [0u8; 31];
+        bytes.copy_from_slice(&hash.as_slice()[..31]);
 
-        Scalar::from(bytes)
+        Challenge(bytes)
     }
 
     /// Verify the proof.
@@ -493,16 +503,97 @@ pub enum Error {
     Ed25519BitCommitmentRepresentation,
 }
 
+// TODO: Document choice of 31-byte challenge
+#[derive(Default, Debug, PartialEq, Clone, Copy)]
+pub struct Challenge([u8; 31]);
+
+impl Challenge {
+    pub fn random<R: RngCore + CryptoRng>(rng: &mut R) -> Self {
+        let mut bytes = [0u8; 31];
+
+        rng.fill_bytes(&mut bytes);
+
+        Self(bytes)
+    }
+
+    fn xor(self, rhs: Challenge) -> Self {
+        let sum = self
+            .0
+            .iter()
+            .zip(rhs.0.iter())
+            .map(|(rhs_byte, lhs_byte)| rhs_byte ^ lhs_byte)
+            .collect::<GenericArray<u8, U31>>();
+
+        Challenge(sum.into())
+    }
+    pub fn into_secp256k1(self) -> secp256k1::Scalar {
+        self.into()
+    }
+
+    pub fn into_ed25519(self) -> ed25519::Scalar {
+        self.into()
+    }
+}
+
+impl Add<Challenge> for Challenge {
+    type Output = Challenge;
+
+    fn add(self, rhs: Challenge) -> Self::Output {
+        self.xor(rhs)
+    }
+}
+
+impl Sub<Challenge> for Challenge {
+    type Output = Challenge;
+
+    fn sub(self, rhs: Challenge) -> Self::Output {
+        self.xor(rhs)
+    }
+}
+
+impl From<Challenge> for secp256k1::Scalar {
+    fn from(from: Challenge) -> Self {
+        let bytes = std::iter::once(0u8)
+            .chain(from.0.iter().copied())
+            .collect::<GenericArray<u8, U32>>();
+
+        secp256k1::Scalar::<Secret, Zero>::from_bytes_mod_order(bytes.into())
+            .mark::<NonZero>()
+            .expect("non-zero scalar")
+    }
+}
+
+impl From<Challenge> for ed25519::Scalar {
+    fn from(from: Challenge) -> Self {
+        let bytes = from
+            .0
+            .iter()
+            .copied()
+            .chain(std::iter::once(0u8))
+            .collect::<GenericArray<u8, U32>>();
+
+        Self::from_bytes_mod_order(bytes.into())
+    }
+}
+
 #[cfg(test)]
 mod proptest {
     use super::*;
     use ::proptest::prelude::*;
 
+    // TODO: We use this to generate test data, and I have verified that it is in
+    // line with what we do to generate random `Scalar`s, but both functions must be
+    // tied together somehow
     prop_compose! {
         pub fn scalar()(
-            bytes in any::<[u8; 32]>(),
+            lsbs in any::<[u8; 31]>(),
+            msb in (0..16u8),
         ) -> Scalar {
-            Scalar::from(bytes)
+            let bytes = lsbs.iter().copied()
+                .chain(std::iter::once(msb))
+                .collect::<GenericArray<u8, U32>>();
+
+            Scalar(bytes.into())
         }
     }
 }
