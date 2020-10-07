@@ -24,10 +24,13 @@ use std::ops::{Add, Sub};
 /// A scalar that is valid for both secp256k1 and ed25519.
 ///
 /// Any valid scalar for ed25519 has the same bit representation for secp256k1,
-/// due to the smaller curve order for ed25519 compared to secp256k1.
-///
-/// On the other hand, not all valid scalars for secp256k1 have the same bit
+/// due to the smaller curve order for ed25519 compared to secp256k1. On the
+/// other hand, not all valid scalars for secp256k1 have the same bit
 /// representation for ed25519.
+///
+/// Since the order of ed25519 is equal to 2^252 +
+/// 0x14def9dea2f79cd65812631a5cf5d3ed, for simplicity we only support 252 bit
+/// scalars.
 #[cfg_attr(
     feature = "serde",
     serde(crate = "serde_crate"),
@@ -37,13 +40,22 @@ use std::ops::{Add, Sub};
 pub struct Scalar([u8; 32]);
 
 impl Scalar {
-    /// Generate a random scalar.
-    ///
-    /// To ensure that the scalar is valid and equal for both secp256k1 and
-    /// ed25519, we delegate to an `ed25519::Scalar` API.
+    /// Generate a random 252 bit scalar.
     pub fn random<R: RngCore + CryptoRng>(rng: &mut R) -> Self {
-        let ed25519 = ed25519::Scalar::random(rng);
-        let bytes = ed25519.to_bytes();
+        let mut bytes = [0u8; 32];
+
+        // try until the scalar generated is no larger than 2^253 - 1
+        loop {
+            rng.fill_bytes(&mut bytes);
+
+            // if the most significant bit of the scalar is greater than 31,
+            // the scalar is larger than 2^253 - 1 and we must try again
+            if bytes[31] > 31 {
+                continue;
+            }
+
+            break;
+        }
 
         Self(bytes)
     }
