@@ -1,5 +1,4 @@
 use crate::Commit;
-use bigint::U256;
 use curve25519_dalek::edwards::{CompressedEdwardsY, EdwardsPoint};
 
 pub use curve25519_dalek::{constants::ED25519_BASEPOINT_TABLE as H, scalar::Scalar};
@@ -19,6 +18,10 @@ lazy_static::lazy_static! {
         .expect("edwards point")
     };
 }
+
+const TWO: Scalar = Scalar::from_bits([
+    2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+]);
 
 pub(crate) struct PedersenCommitment(Point);
 
@@ -64,10 +67,8 @@ pub(crate) fn bit_as_scalar(bit: bool) -> Scalar {
 
 /// Calculate sum of `s_i * 2^i`, where `i` is the bit index.
 pub(crate) fn blinder_sum(s_is: &[Scalar]) -> Scalar {
-    let two = U256::from(2u8);
     s_is.iter().enumerate().fold(Scalar::zero(), |acc, (i, s)| {
-        let exp = two.pow(U256::from(i));
-        let exp = Scalar::from_bytes_mod_order(exp.into());
+        let exp = two_to_the_power_of(i);
 
         acc + exp * s
     })
@@ -80,20 +81,21 @@ pub(crate) fn verify_bit_commitments_represent_dleq_commitment(
     xH: Point,
     s: Scalar,
 ) -> bool {
-    let two = U256::from(2u8);
-
     let C_H =
         C_H_is
             .iter()
             .enumerate()
             .fold(Scalar::zero() * Point::default(), |acc, (i, C_H_i)| {
-                let exp = two.pow(U256::from(i));
-                let exp = Scalar::from_bytes_mod_order(exp.into());
+                let exp = two_to_the_power_of(i);
 
                 acc + exp * C_H_i
             });
 
     C_H - s * *H_PRIME == xH
+}
+
+fn two_to_the_power_of(exp: usize) -> Scalar {
+    (0..exp).fold(Scalar::one(), |acc, _| acc * TWO)
 }
 
 #[cfg(test)]
@@ -105,7 +107,7 @@ mod tests {
     proptest! {
         #![proptest_config(ProptestConfig::with_cases(10))]
         #[test]
-        fn bit_commitments_represent_dleq_commitment(x in proptest::scalar()) {
+        fn ed_bit_commitments_represent_dleq_commitment(x in proptest::scalar()) {
             let mut rng = rand::thread_rng();
 
             let xH = &x.into_ed25519() * &H;
