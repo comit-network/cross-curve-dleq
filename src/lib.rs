@@ -532,7 +532,7 @@ mod tests {
     }
 
     proptest! {
-        #![proptest_config(ProptestConfig::with_cases(1))]
+        #![proptest_config(ProptestConfig::with_cases(10))]
         #[test]
         fn cross_group_dleq_proof_is_valid(
             x in proptest::scalar(),
