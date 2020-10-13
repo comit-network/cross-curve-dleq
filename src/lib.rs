@@ -12,9 +12,13 @@ use crate::{
     },
 };
 use bit_vec::BitVec;
-use ecdsa_fun::fun::{
-    marker::{Jacobian, NonZero, Normal},
-    s,
+use ecdsa_fun::{
+    fun::{
+        marker::{Jacobian, NonZero, Normal},
+        s,
+    },
+    nonce::Deterministic,
+    ECDSA,
 };
 use generic_array::{
     typenum::consts::{U252, U31, U32},
@@ -186,6 +190,8 @@ pub struct Proof {
     /// Calculation: sum of `s_i * 2^i`, where `i` is the index of the bit and
     /// `s_i` its blinder.
     s: ed25519::Scalar,
+    pi_G: secp256k1::Signature,
+    pi_H: ed25519::Signature,
 }
 
 impl Proof {
@@ -222,6 +228,12 @@ impl Proof {
     /// `i` and the `s` equal to the sum `s_i * 2^i` for all `i`. The verifier
     /// will simply operate as indicated above and verify that the equalities
     /// hold.
+    ///
+    /// 6. Prove that the public values `witness * G` and `witness * H` are
+    /// solely composed of a scalar multiplied by the basepoints `G` and `H`
+    /// respectively. This can be achieved by proving knowledge of the discrete
+    /// logarithm of the public value w.r.t. the corresponding basepoint, so a
+    /// signature per public value suffices.
     ///
     /// [_composition of Sigma-protocols_]: https://www.win.tue.nl/~berry/CryptographicProtocols/LectureNotes.pdf
     pub fn new<R: RngCore + CryptoRng>(rng: &mut R, witness: &Scalar) -> Proof {
@@ -379,6 +391,30 @@ impl Proof {
         // sum of `s_i * 2^i` for all `i`
         let s = ed25519::blinder_sum(&s_is);
 
+        // this signature serves as proof that the unblinded sum of the commitments is
+        // of the form `x * G`
+        let pi_G = {
+            let ecdsa = ECDSA::<Deterministic<Sha256>>::default();
+
+            let x = witness.into_secp256k1();
+            let X = ecdsa.verification_key_for(&x);
+
+            let pk_hash = Sha256::digest(&X.to_bytes()).into();
+
+            ecdsa.sign(&x, &pk_hash)
+        };
+
+        // this signature serves as proof that the unblinded sum of the commitments is
+        // of the form `x * H`
+        let pi_H = {
+            let x = witness.into_ed25519();
+            let X = &x * &H;
+
+            let pk_hash: [u8; 32] = Sha256::digest(X.compress().as_bytes()).into();
+
+            ed25519::Signature::new(rng, &x, &pk_hash)
+        };
+
         Proof {
             C_G_is,
             C_H_is,
@@ -394,6 +430,8 @@ impl Proof {
             res_H_1s,
             r,
             s,
+            pi_G,
+            pi_H,
         }
     }
 
@@ -432,23 +470,48 @@ impl Proof {
     ///
     /// 1. Ensure that the combinations of Pedersen Commitments actually
     /// represent the public values `xG` and `xH`.
-    /// 2. Ensure that each bitwise response satisfies its corresponding
+    /// 2. Ensure that the public values `xG` and `xH` actually only have `G`
+    /// and `H` components respectively.
+    /// 3. Ensure that each bitwise response satisfies its corresponding
     /// challenge.
     pub fn verify(
         &self,
         xG: secp256k1::Point<impl secp256k1::PointType>,
         xH: ed25519::Point,
     ) -> Result<(), Error> {
+        // avoid a quirk in ed25519 where some points can be used to produce wildcard
+        // signatures. See: https://slowli.github.io/ed25519-quirks/wildcards/
+        if !xH.is_torsion_free() {
+            return Err(Error::Ed25519TorsionPoint);
+        }
+
         if !secp256k1::verify_bit_commitments_represent_dleq_commitment(
             &self.C_G_is,
-            &xG.mark::<Jacobian>(),
+            &xG.clone().mark::<Jacobian>(),
             &self.r,
         ) {
             return Err(Error::Secp256k1BitCommitmentRepresentation);
         }
 
+        let pi_G_is_valid = {
+            let ecdsa = ECDSA::verify_only();
+            let pk_hash = Sha256::digest(&xG.clone().mark::<Normal>().to_bytes()).into();
+            ecdsa.verify(&xG, &pk_hash, &self.pi_G)
+        };
+        if !pi_G_is_valid {
+            return Err(Error::Secp256k1Signature);
+        }
+
         if !ed25519::verify_bit_commitments_represent_dleq_commitment(&self.C_H_is, xH, self.s) {
             return Err(Error::Ed25519BitCommitmentRepresentation);
+        }
+
+        let pi_H_is_valid = {
+            let pk_hash: [u8; 32] = Sha256::digest(xH.compress().as_bytes()).into();
+            self.pi_H.verify(&xH, &pk_hash)
+        };
+        if !pi_H_is_valid {
+            return Err(Error::Ed25519Signature);
         }
 
         let c = Self::compute_challenge(
@@ -501,6 +564,12 @@ pub enum Error {
     Secp256k1BitCommitmentRepresentation,
     #[error("combination of bitwise ed25519 pedersen commitments not equal to public value")]
     Ed25519BitCommitmentRepresentation,
+    #[error("signature failed to prove that secp256k1 public value is of the form x * G")]
+    Secp256k1Signature,
+    #[error("signature failed to prove that ed25519 public value is of the form x * H")]
+    Ed25519Signature,
+    #[error("ed25519 public value is a torsion point")]
+    Ed25519TorsionPoint,
 }
 
 // TODO: Document choice of 31-byte challenge

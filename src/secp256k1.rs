@@ -2,7 +2,10 @@ use crate::Commit;
 use ecdsa_fun::fun::marker::{Jacobian, Mark, NonZero, Secret, Zero};
 use std::num::NonZeroU32;
 
-pub use ecdsa_fun::fun::{g, marker, marker::PointType, s, Point, Scalar, G};
+pub use ecdsa_fun::{
+    fun::{g, marker, marker::PointType, s, Point, Scalar, G},
+    Signature,
+};
 
 lazy_static::lazy_static! {
     /// Alternate generator of secp256k1.
@@ -75,7 +78,7 @@ pub fn blinder_sum(r_is: &[Scalar]) -> Scalar {
 /// public value `xG` for all `C_G_i` in `C_G_is`.
 pub fn verify_bit_commitments_represent_dleq_commitment(
     C_G_is: &[Point<Jacobian>],
-    xG: &Point<Jacobian>,
+    X: &Point<Jacobian>,
     r: &Scalar,
 ) -> bool {
     let C_G =
@@ -87,7 +90,7 @@ pub fn verify_bit_commitments_represent_dleq_commitment(
                 g!(acc + exp * C_G_i)
             });
 
-    &g!(C_G - r * G_PRIME) == xG
+    &g!(C_G - r * G_PRIME) == X
 }
 
 fn two_to_the_power_of(exp: usize) -> Scalar {
