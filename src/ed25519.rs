@@ -1,5 +1,6 @@
 use crate::Commit;
 use curve25519_dalek::edwards::{CompressedEdwardsY, EdwardsPoint};
+use sha2::{Digest, Sha512};
 
 pub use curve25519_dalek::{constants::ED25519_BASEPOINT_TABLE as H, scalar::Scalar};
 
@@ -78,7 +79,7 @@ pub(crate) fn blinder_sum(s_is: &[Scalar]) -> Scalar {
 /// public value `xH` for all `C_H_i` in `C_H_is`.
 pub(crate) fn verify_bit_commitments_represent_dleq_commitment(
     C_H_is: &[Point],
-    xH: Point,
+    X: Point,
     s: Scalar,
 ) -> bool {
     let C_H =
@@ -91,12 +92,69 @@ pub(crate) fn verify_bit_commitments_represent_dleq_commitment(
                 acc + exp * C_H_i
             });
 
-    C_H - s * *H_PRIME == xH
+    C_H - s * *H_PRIME == X
 }
 
 fn two_to_the_power_of(exp: usize) -> Scalar {
     (0..exp).fold(Scalar::one(), |acc, _| acc * TWO)
 }
+
+#[cfg_attr(
+    feature = "serde",
+    serde(crate = "serde_crate"),
+    derive(serde_crate::Serialize, serde_crate::Deserialize)
+)]
+#[derive(Clone, Debug)]
+pub struct Signature {
+    R: Point,
+    s: Scalar,
+}
+
+impl Signature {
+    pub fn new<R: rand::RngCore + rand::CryptoRng>(rng: &mut R, x: &Scalar, digest: &[u8]) -> Self {
+        let r = Scalar::random(rng);
+        let R = &r * &H;
+
+        let X = x * &H;
+
+        let hash = Sha512::default()
+            .chain(&R.compress().as_bytes())
+            .chain(&X.compress().as_bytes())
+            .chain(digest)
+            .finalize();
+
+        let mut bytes = [0u8; 64];
+        bytes.copy_from_slice(&hash);
+
+        let c = Scalar::from_bytes_mod_order_wide(&bytes);
+
+        let s = r + c * x;
+
+        Self { R, s }
+    }
+
+    #[must_use]
+    pub fn verify(&self, X: &Point, digest: &[u8]) -> bool {
+        let hash = Sha512::default()
+            .chain(&self.R.compress().as_bytes())
+            .chain(&X.compress().as_bytes())
+            .chain(digest)
+            .finalize();
+
+        let mut bytes = [0u8; 64];
+        bytes.copy_from_slice(&hash);
+
+        let c = Scalar::from_bytes_mod_order_wide(&bytes);
+
+        let R_prime = &self.s * &H - c * X;
+
+        R_prime == self.R
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("failed to verify signature")]
+pub struct VerificationError;
 
 #[cfg(test)]
 mod tests {
