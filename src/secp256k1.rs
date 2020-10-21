@@ -1,5 +1,5 @@
 use crate::Commit;
-use ecdsa_fun::fun::marker::{Jacobian, Mark, NonZero, Secret, Zero};
+use ecdsa_fun::fun::marker::{Jacobian, Mark, NonZero, Normal, Secret, Zero};
 use std::num::NonZeroU32;
 
 pub use ecdsa_fun::fun::{g, marker, marker::PointType, s, Point, Scalar, G};
@@ -18,7 +18,7 @@ lazy_static::lazy_static! {
         Scalar::from_non_zero_u32(NonZeroU32::new(2).expect("2 != 0"));
 }
 
-pub struct PedersenCommitment(Point<Jacobian>);
+pub struct PedersenCommitment(Point);
 
 impl PedersenCommitment {
     /// Generate a Pedersen Commitment for the scalar `x`.
@@ -28,6 +28,7 @@ impl PedersenCommitment {
     ) -> (Self, Scalar) {
         let r = Scalar::random(rng);
         let commitment = g!(x * G + r * G_PRIME)
+            .mark::<Normal>()
             .mark::<NonZero>()
             .expect("r to be non-zero");
 
@@ -36,7 +37,7 @@ impl PedersenCommitment {
 }
 
 impl Commit for PedersenCommitment {
-    type Commitment = Point<Jacobian>;
+    type Commitment = Point;
     type Blinder = Scalar;
 
     fn commit<R: rand::RngCore + rand::CryptoRng>(
@@ -74,8 +75,8 @@ pub fn blinder_sum(r_is: &[Scalar]) -> Scalar {
 /// Check that the sum of `C_G_i * 2^i` minus `r * G_PRIME` is equal to the
 /// public value `xG` for all `C_G_i` in `C_G_is`.
 pub fn verify_bit_commitments_represent_dleq_commitment(
-    C_G_is: &[Point<Jacobian>],
-    xG: &Point<Jacobian>,
+    C_G_is: &[Point],
+    xG: &Point,
     r: &Scalar,
 ) -> bool {
     let C_G =
@@ -106,7 +107,7 @@ mod tests {
         fn bit_commitments_represent_dleq_commitment(x in proptest::scalar()) {
             let mut rng = rand::thread_rng();
 
-            let xG = g!({ x.into_secp256k1() } * G);
+            let xG = g!({ x.into_secp256k1() } * G).mark::<Normal>();
 
             let (C_G_is, r_is) = x
                 .bits()

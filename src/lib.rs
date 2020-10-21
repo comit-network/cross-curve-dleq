@@ -13,7 +13,7 @@ use crate::{
 };
 use bit_vec::BitVec;
 use ecdsa_fun::fun::{
-    marker::{Jacobian, NonZero, Normal},
+    marker::{NonZero, Normal},
     s,
 };
 use generic_array::{typenum::consts::U256, GenericArray};
@@ -125,7 +125,7 @@ pub struct Proof {
     /// Mathematical expression: `b_i * G + r_i * G_PRIME`, where `b_i` is the
     /// `ith` bit, `r_i` is its blinder, and `G` and `G_PRIME` are generators of
     /// secp256k1.
-    C_G_is: GenericArray<secp256k1::Point<Jacobian>, U256>,
+    C_G_is: GenericArray<secp256k1::Point, U256>,
     /// Pedersen Commitments for bits of the ed25519 scalar.
     ///
     /// Mathematical expression: `b_i * H + s_i * H_PRIME`, where `b_i` is the
@@ -205,7 +205,7 @@ impl Proof {
     pub fn new<R: RngCore + CryptoRng>(rng: &mut R, witness: &Scalar) -> Proof {
         let bits = witness.bits();
 
-        let mut C_G_is = GenericArray::<secp256k1::Point<Jacobian>, U256>::default();
+        let mut C_G_is = GenericArray::<secp256k1::Point, U256>::default();
         let mut r_is = GenericArray::<secp256k1::Scalar, U256>::default();
 
         let mut C_H_is = GenericArray::<ed25519::Point, U256>::default();
@@ -412,16 +412,9 @@ impl Proof {
     /// represent the public values `xG` and `xH`.
     /// 2. Ensure that each bitwise response satisfies its corresponding
     /// challenge.
-    pub fn verify(
-        &self,
-        xG: secp256k1::Point<impl secp256k1::PointType>,
-        xH: ed25519::Point,
-    ) -> Result<(), Error> {
-        if !secp256k1::verify_bit_commitments_represent_dleq_commitment(
-            &self.C_G_is,
-            &xG.mark::<Jacobian>(),
-            &self.r,
-        ) {
+    pub fn verify(&self, xG: secp256k1::Point, xH: ed25519::Point) -> Result<(), Error> {
+        if !secp256k1::verify_bit_commitments_represent_dleq_commitment(&self.C_G_is, &xG, &self.r)
+        {
             return Err(Error::Secp256k1BitCommitmentRepresentation);
         }
 
@@ -522,7 +515,7 @@ mod tests {
         fn cross_group_dleq_proof_is_valid(
             x in proptest::scalar(),
         ) {
-            let xG = g!({ x.into_secp256k1() } * G);
+            let xG = g!({ x.into_secp256k1() } * G).mark::<Normal>();
             let xH = &x.into_ed25519() * &H;
 
             let proof = Proof::new(&mut thread_rng(), &x);
@@ -540,7 +533,7 @@ mod tests {
         ) {
             let mut rng = thread_rng();
 
-            let xG = g!({ x.into_secp256k1() } * G);
+            let xG = g!({ x.into_secp256k1() } * G).mark::<Normal>();
             let xH = &x.into_ed25519() * &H;
 
             let proof = Proof::new(&mut rng, &y);
