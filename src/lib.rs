@@ -123,6 +123,7 @@ impl From<Scalar> for ed25519::Scalar {
 
 /// Non-interactive zero-knowledge proof of knowledge of the same discrete
 /// logarithm across secp256k1 and ed25519.
+#[derive(Clone, Debug)]
 pub struct Proof {
     /// Pedersen Commitments for bits of the secp256k1 scalar.
     ///
