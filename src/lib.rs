@@ -16,6 +16,7 @@ use ecdsa_fun::fun::{
     marker::{Jacobian, NonZero, Normal},
     s,
 };
+use generic_array::{typenum::consts::U256, GenericArray};
 use rand::{CryptoRng, RngCore};
 use sha2::{Digest, Sha256};
 use std::ops::{Add, Sub};
@@ -27,7 +28,7 @@ use std::ops::{Add, Sub};
 ///
 /// On the other hand, not all valid scalars for secp256k1 have the same bit
 /// representation for ed25519.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Default, Debug, Clone, Copy, PartialEq)]
 pub struct Scalar([u8; 32]);
 
 impl Scalar {
@@ -62,26 +63,20 @@ impl Scalar {
 }
 
 /// Implement addition for `Scalar`.
-///
-/// We choose to rely on `secp256k1::Scalar` for this, but it should be
-/// equivalent to use `ed25519::Scalar` instead.
 impl Add<Scalar> for Scalar {
     type Output = Scalar;
     fn add(self, rhs: Scalar) -> Self::Output {
-        let res = s!({ self.into_secp256k1() } + { rhs.into_secp256k1() });
+        let res = self.into_ed25519() + rhs.into_ed25519();
 
         Scalar(res.to_bytes())
     }
 }
 
 /// Implement subtraction for `Scalar`.
-///
-/// We choose to rely on `secp256k1::Scalar` for this, but it should be
-/// equivalent to use `ed25519::Scalar` instead.
 impl Sub<Scalar> for Scalar {
     type Output = Scalar;
     fn sub(self, rhs: Scalar) -> Self::Output {
-        let res = s!({ self.into_secp256k1() } - { rhs.into_secp256k1() });
+        let res = self.into_ed25519() - rhs.into_ed25519();
 
         Scalar(res.to_bytes())
     }
@@ -130,35 +125,35 @@ pub struct Proof {
     /// Mathematical expression: `b_i * G + r_i * G_PRIME`, where `b_i` is the
     /// `ith` bit, `r_i` is its blinder, and `G` and `G_PRIME` are generators of
     /// secp256k1.
-    C_G_is: Vec<secp256k1::Point<Jacobian>>,
+    C_G_is: GenericArray<secp256k1::Point<Jacobian>, U256>,
     /// Pedersen Commitments for bits of the ed25519 scalar.
     ///
     /// Mathematical expression: `b_i * H + s_i * H_PRIME`, where `b_i` is the
     /// `ith` bit, `s_i` is its blinder, and `H` and `H_PRIME` are generators of
     /// secp256k1.
-    C_H_is: Vec<ed25519::Point>,
+    C_H_is: GenericArray<ed25519::Point, U256>,
     /// Challenges for proofs that a bit is equal to 0.
-    c_0s: Vec<Scalar>,
+    c_0s: GenericArray<Scalar, U256>,
     /// Challenges for proofs that a bit is equal to 1.
-    c_1s: Vec<Scalar>,
+    c_1s: GenericArray<Scalar, U256>,
     /// Announcements for proofs that a bit of the secp256k1 scalar is equal to
     /// 0.
-    U_G_0s: Vec<secp256k1::Point>,
+    U_G_0s: GenericArray<secp256k1::Point, U256>,
     /// Announcements for proofs that a bit of the ed25519 scalar is equal to 0.
-    U_H_0s: Vec<ed25519::Point>,
+    U_H_0s: GenericArray<ed25519::Point, U256>,
     /// Announcements for proofs that a bit of the secp256k1 scalar is equal to
     /// 1.
-    U_G_1s: Vec<secp256k1::Point>,
+    U_G_1s: GenericArray<secp256k1::Point, U256>,
     /// Announcements for proofs that a bit of the ed25519 scalar is equal to 0.
-    U_H_1s: Vec<ed25519::Point>,
+    U_H_1s: GenericArray<ed25519::Point, U256>,
     /// Responses for proofs that a bit of the secp256k1 scalar is equal to 0.
-    res_G_0s: Vec<secp256k1::Scalar>,
+    res_G_0s: GenericArray<secp256k1::Scalar, U256>,
     /// Responses for proofs that a bit of the ed25519 scalar is equal to 0.
-    res_H_0s: Vec<ed25519::Scalar>,
+    res_H_0s: GenericArray<ed25519::Scalar, U256>,
     /// Responses for proofs that a bit of the secp256k1 scalar is equal to 1.
-    res_G_1s: Vec<secp256k1::Scalar>,
+    res_G_1s: GenericArray<secp256k1::Scalar, U256>,
     /// Responses for proofs that a bit of the ed25519 scalar is equal to 1.
-    res_H_1s: Vec<ed25519::Scalar>,
+    res_H_1s: GenericArray<ed25519::Scalar, U256>,
     /// Blinder for the "overall" Pedersen Commitment of the secp256k1 scalar.
     ///
     /// Calculation: sum of `r_i * 2^i`, where `i` is the index of the bit and
@@ -210,25 +205,25 @@ impl Proof {
     pub fn new<R: RngCore + CryptoRng>(rng: &mut R, witness: &Scalar) -> Proof {
         let bits = witness.bits();
 
-        let mut C_G_is = Vec::new();
-        let mut r_is = Vec::new();
+        let mut C_G_is = GenericArray::<secp256k1::Point<Jacobian>, U256>::default();
+        let mut r_is = GenericArray::<secp256k1::Scalar, U256>::default();
 
-        let mut C_H_is = Vec::new();
-        let mut s_is = Vec::new();
+        let mut C_H_is = GenericArray::<ed25519::Point, U256>::default();
+        let mut s_is = GenericArray::<ed25519::Scalar, U256>::default();
 
-        let mut c_cheats = Vec::new();
+        let mut c_cheats = GenericArray::<Scalar, U256>::default();
 
-        let mut U_G_0s = Vec::new();
-        let mut U_H_0s = Vec::new();
-        let mut U_G_1s = Vec::new();
-        let mut U_H_1s = Vec::new();
+        let mut U_G_0s = GenericArray::<secp256k1::Point, U256>::default();
+        let mut U_H_0s = GenericArray::<ed25519::Point, U256>::default();
+        let mut U_G_1s = GenericArray::<secp256k1::Point, U256>::default();
+        let mut U_H_1s = GenericArray::<ed25519::Point, U256>::default();
 
-        let mut res_G_0s = Vec::new();
-        let mut res_H_0s = Vec::new();
-        let mut res_G_1s = Vec::new();
-        let mut res_H_1s = Vec::new();
+        let mut res_G_0s = GenericArray::<secp256k1::Scalar, U256>::default();
+        let mut res_H_0s = GenericArray::<ed25519::Scalar, U256>::default();
+        let mut res_G_1s = GenericArray::<secp256k1::Scalar, U256>::default();
+        let mut res_H_1s = GenericArray::<ed25519::Scalar, U256>::default();
 
-        for b in bits.iter() {
+        for (i, b) in bits.iter().enumerate() {
             // compute commitment corresponding to each opening
             let (C_G, r) = secp256k1::PedersenCommitment::commit(rng, b);
             let (C_H, s) = ed25519::PedersenCommitment::commit(rng, b);
@@ -242,7 +237,7 @@ impl Proof {
             };
             let sH_prime = {
                 let b = ed25519::bit_as_scalar(!b);
-                C_H - b * H
+                C_H - &H * &b
             };
 
             // generate randomness for actual bit w.r.t. secp256k1 and ed25519 groups
@@ -272,38 +267,38 @@ impl Proof {
                 res_H_cheat * *H_PRIME - c_cheat * sH_prime
             };
 
-            C_G_is.push(C_G);
-            r_is.push(r);
+            C_G_is[i] = C_G;
+            r_is[i] = r;
 
-            C_H_is.push(C_H);
-            s_is.push(s);
+            C_H_is[i] = C_H;
+            s_is[i] = s;
 
-            c_cheats.push(c_cheat);
+            c_cheats[i] = c_cheat;
 
             if b {
                 // if the the actual value of the bit is 1, we cheat on the announcement and
                 // response for the proof that proves that the value of the bit is 0
-                U_G_0s.push(U_G_cheat);
-                U_H_0s.push(U_H_cheat);
-                res_G_0s.push(res_G_cheat);
-                res_H_0s.push(res_H_cheat);
+                U_G_0s[i] = U_G_cheat;
+                U_H_0s[i] = U_H_cheat;
+                res_G_0s[i] = res_G_cheat;
+                res_H_0s[i] = res_H_cheat;
 
-                U_G_1s.push(U_G);
-                U_H_1s.push(U_H);
-                res_G_1s.push(u_G);
-                res_H_1s.push(u_H);
+                U_G_1s[i] = U_G;
+                U_H_1s[i] = U_H;
+                res_G_1s[i] = u_G;
+                res_H_1s[i] = u_H;
             } else {
-                U_G_0s.push(U_G);
-                U_H_0s.push(U_H);
-                res_G_0s.push(u_G);
-                res_H_0s.push(u_H);
+                U_G_0s[i] = U_G;
+                U_H_0s[i] = U_H;
+                res_G_0s[i] = u_G;
+                res_H_0s[i] = u_H;
 
                 // if the the actual value of the bit is 0, we cheat on the announcement and
                 // response for the proof that proves that the value of the bit is 1
-                U_G_1s.push(U_G_cheat);
-                U_H_1s.push(U_H_cheat);
-                res_G_1s.push(res_G_cheat);
-                res_H_1s.push(res_H_cheat);
+                U_G_1s[i] = U_G_cheat;
+                U_H_1s[i] = U_H_cheat;
+                res_G_1s[i] = res_G_cheat;
+                res_H_1s[i] = res_H_cheat;
             }
         }
 
@@ -324,8 +319,8 @@ impl Proof {
             &U_H_1s,
         );
 
-        let mut c_0s = Vec::new();
-        let mut c_1s = Vec::new();
+        let mut c_0s = GenericArray::<Scalar, U256>::default();
+        let mut c_1s = GenericArray::<Scalar, U256>::default();
 
         for (i, b) in bits.iter().enumerate() {
             if b {
@@ -339,8 +334,8 @@ impl Proof {
                     .expect("non-zero response");
                 res_H_1s[i] += c_1.into_ed25519() * s_is[i];
 
-                c_0s.push(c_0);
-                c_1s.push(c_1);
+                c_0s[i] = c_0;
+                c_1s[i] = c_1;
             } else {
                 let c_1 = c_cheats[i];
                 // compute challenge for the actual bit
@@ -352,15 +347,15 @@ impl Proof {
                     .expect("non-zero response");
                 res_H_0s[i] += c_0.into_ed25519() * s_is[i];
 
-                c_0s.push(c_0);
-                c_1s.push(c_1);
+                c_0s[i] = c_0;
+                c_1s[i] = c_1;
             };
         }
 
         // sum of `r_i * 2^i` for all `i`
         let r = secp256k1::blinder_sum(&r_is);
         // sum of `s_i * 2^i` for all `i`
-        let s = ed25519::blinder_sum(s_is);
+        let s = ed25519::blinder_sum(&s_is);
 
         Proof {
             C_G_is,
@@ -383,7 +378,7 @@ impl Proof {
     /// Compute challenge by hashing the statements (Pedersen Commitments) and
     /// announcements for each bitwise proof.
     pub fn compute_challenge(
-        C_G_is: &[secp256k1::Point],
+        C_G_is: &[secp256k1::Point<impl secp256k1::PointType>],
         C_H_is: &[ed25519::Point],
         U_G_0s: &[secp256k1::Point],
         U_G_1s: &[secp256k1::Point],
@@ -393,7 +388,7 @@ impl Proof {
         let mut hasher = Sha256::default();
 
         for (i, (C_G_i, C_H_i)) in C_G_is.iter().zip(C_H_is.iter()).enumerate() {
-            hasher.update(C_G_i.to_bytes());
+            hasher.update(C_G_i.clone().mark::<Normal>().to_bytes());
             hasher.update(C_H_i.compress().as_bytes());
             hasher.update(U_G_0s[i].to_bytes());
             hasher.update(U_G_1s[i].to_bytes());
@@ -417,8 +412,16 @@ impl Proof {
     /// represent the public values `xG` and `xH`.
     /// 2. Ensure that each bitwise response satisfies its corresponding
     /// challenge.
-    pub fn verify(&self, xG: &secp256k1::Point<Jacobian>, xH: ed25519::Point) -> Result<(), Error> {
-        if !secp256k1::verify_bit_commitments_represent_dleq_commitment(&self.C_G_is, xG, &self.r) {
+    pub fn verify(
+        &self,
+        xG: secp256k1::Point<impl secp256k1::PointType>,
+        xH: ed25519::Point,
+    ) -> Result<(), Error> {
+        if !secp256k1::verify_bit_commitments_represent_dleq_commitment(
+            &self.C_G_is,
+            &xG.mark::<Jacobian>(),
+            &self.r,
+        ) {
             return Err(Error::Secp256k1BitCommitmentRepresentation);
         }
 
@@ -427,12 +430,7 @@ impl Proof {
         }
 
         let c = Self::compute_challenge(
-            &self
-                .C_G_is
-                .clone()
-                .into_iter()
-                .map(Mark::mark::<Normal>)
-                .collect::<Vec<_>>(),
+            &self.C_G_is,
             &self.C_H_is,
             &self.U_G_0s,
             &self.U_G_1s,
@@ -461,7 +459,7 @@ impl Proof {
             if g!(res_G_0 * G_PRIME) != g!(U_G_0 + { c_0.into_secp256k1() } * C_G_i)
                 || g!(res_G_1 * G_PRIME) != g!(U_G_1 + { c_1.into_secp256k1() } * (C_G_i - G))
                 || res_H_0 * *H_PRIME != U_H_0 + c_0.into_ed25519() * C_H_i
-                || res_H_1 * *H_PRIME != U_H_1 + c_1.into_ed25519() * (C_H_i - H)
+                || res_H_1 * *H_PRIME != U_H_1 + c_1.into_ed25519() * (C_H_i - H.basepoint())
             {
                 return Err(Error::ResponseVerification);
             }
@@ -519,17 +517,17 @@ mod tests {
     }
 
     proptest! {
-        #![proptest_config(ProptestConfig::with_cases(10))]
+        #![proptest_config(ProptestConfig::with_cases(1))]
         #[test]
         fn cross_group_dleq_proof_is_valid(
             x in proptest::scalar(),
         ) {
             let xG = g!({ x.into_secp256k1() } * G);
-            let xH = x.into_ed25519() * H;
+            let xH = &x.into_ed25519() * &H;
 
             let proof = Proof::new(&mut thread_rng(), &x);
 
-            assert!(proof.verify(&xG, xH).is_ok());
+            assert!(proof.verify(xG, xH).is_ok());
         }
     }
 
@@ -543,11 +541,11 @@ mod tests {
             let mut rng = thread_rng();
 
             let xG = g!({ x.into_secp256k1() } * G);
-            let xH = x.into_ed25519() * H;
+            let xH = &x.into_ed25519() * &H;
 
             let proof = Proof::new(&mut rng, &y);
 
-            assert!(proof.verify(&xG, xH).is_err());
+            assert!(proof.verify(xG, xH).is_err());
         }
     }
 }

@@ -1,17 +1,21 @@
 use crate::Commit;
+use ecdsa_fun::fun::marker::{Jacobian, Mark, NonZero, Secret, Zero};
+use std::num::NonZeroU32;
 
-use bigint::U256;
-pub use ecdsa_fun::fun::{g, marker, s, Point, Scalar, G};
-
-use marker::{Jacobian, Mark, NonZero, Secret, Zero};
+pub use ecdsa_fun::fun::{g, marker, marker::PointType, s, Point, Scalar, G};
 
 lazy_static::lazy_static! {
     /// Alternate generator of secp256k1.
+    ///
+    /// Obtained by hashing `ecdsa_fun::fun::G`. Originally used in Grin.
     pub static ref G_PRIME: Point =
         Point::from_bytes(hex_literal::hex!(
             "0250929b74c1a04954b78b4b6035e97a5e078a5a0f28ec96d547bfee9ace803ac0"
         ))
         .expect("valid point");
+
+    static ref TWO: Scalar =
+        Scalar::from_non_zero_u32(NonZeroU32::new(2).expect("2 != 0"));
 }
 
 pub struct PedersenCommitment(Point<Jacobian>);
@@ -57,13 +61,10 @@ pub fn bit_as_scalar(bit: bool) -> Scalar<Secret, Zero> {
 
 /// Calculate sum of `r_i * 2^i`, where `i` is the bit index.
 pub fn blinder_sum(r_is: &[Scalar]) -> Scalar {
-    let two = U256::from(2u8);
     r_is.iter()
         .enumerate()
         .fold(Scalar::zero(), |acc, (i, r)| {
-            let exp = two.pow(U256::from(i));
-            let exp = Scalar::from_bytes(exp.into()).unwrap();
-
+            let exp = two_to_the_power_of(i);
             s!(acc + exp * r)
         })
         .mark::<NonZero>()
@@ -77,20 +78,20 @@ pub fn verify_bit_commitments_represent_dleq_commitment(
     xG: &Point<Jacobian>,
     r: &Scalar,
 ) -> bool {
-    let two = U256::from(2u8);
-
     let C_G =
         C_G_is
             .iter()
             .enumerate()
             .fold(Point::zero().mark::<Jacobian>(), |acc, (i, C_G_i)| {
-                let exp = two.pow(U256::from(i));
-                let exp = Scalar::from_bytes_mod_order(exp.into());
-
+                let exp = two_to_the_power_of(i);
                 g!(acc + exp * C_G_i)
             });
 
     &g!(C_G - r * G_PRIME) == xG
+}
+
+fn two_to_the_power_of(exp: usize) -> Scalar {
+    (0..exp).fold(Scalar::one(), |acc, _| s!(acc * TWO))
 }
 
 #[cfg(test)]

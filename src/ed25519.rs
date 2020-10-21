@@ -2,12 +2,15 @@ use crate::Commit;
 use bigint::U256;
 use curve25519_dalek::edwards::{CompressedEdwardsY, EdwardsPoint};
 
-pub use curve25519_dalek::{constants::ED25519_BASEPOINT_POINT as H, scalar::Scalar};
+pub use curve25519_dalek::{constants::ED25519_BASEPOINT_TABLE as H, scalar::Scalar};
 
 pub type Point = EdwardsPoint;
 
 lazy_static::lazy_static! {
     /// Alternate generator of ed25519.
+    ///
+    /// Obtained by hashing `curve25519_dalek::constants::ED25519_BASEPOINT_POINT`.
+    /// Originally used in Monero Ring Confidential Transactions.
     pub static ref H_PRIME: EdwardsPoint = {
         CompressedEdwardsY(hex_literal::hex!(
             "8b655970153799af2aeadc9ff1add0ea6c7251d54154cfa92c173a0dd39c1f94"
@@ -23,7 +26,7 @@ impl PedersenCommitment {
     /// Generate a Pedersen Commitment for the scalar `x`.
     pub fn new<R: rand::RngCore + rand::CryptoRng>(rng: &mut R, x: Scalar) -> (Self, Scalar) {
         let s = Scalar::random(rng);
-        let C_H = x * H + s * *H_PRIME;
+        let C_H = &x * &H + s * *H_PRIME;
 
         (Self(C_H), s)
     }
@@ -53,8 +56,11 @@ pub fn bit_as_scalar(bit: bool) -> Scalar {
     }
 }
 
-/// Calculate sum of `r * 2^i`, where `i` is the bit index.
-pub fn blinder_sum(s_is: Vec<Scalar>) -> Scalar {
+// TODO: Should not need to use `bigint::U256` by doing something like
+// what we do in `secp256k1.rs`.
+
+/// Calculate sum of `s_i * 2^i`, where `i` is the bit index.
+pub fn blinder_sum(s_is: &[Scalar]) -> Scalar {
     let two = U256::from(2u8);
     s_is.iter().enumerate().fold(Scalar::zero(), |acc, (i, s)| {
         let exp = two.pow(U256::from(i));
@@ -99,7 +105,7 @@ mod tests {
         fn bit_commitments_represent_dleq_commitment(x in proptest::scalar()) {
             let mut rng = rand::thread_rng();
 
-            let xH = x.into_ed25519() * H;
+            let xH = &x.into_ed25519() * &H;
 
             let (C_H_is, s_is) = x
                 .bits()
@@ -107,7 +113,7 @@ mod tests {
                 .map(|b| PedersenCommitment::commit(&mut rng, b))
                 .unzip::<_, _, Vec<_>, Vec<_>>();
 
-            let s = blinder_sum(s_is);
+            let s = blinder_sum(&s_is);
 
             assert!(verify_bit_commitments_represent_dleq_commitment(
                 &C_H_is, xH, s
