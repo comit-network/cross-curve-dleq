@@ -52,7 +52,7 @@ impl Scalar {
     ///
     /// The vector of bits is ordered from least significant bit to most
     /// significant bit.
-    pub fn bits(&self) -> BitVec {
+    pub(crate) fn bits(&self) -> BitVec {
         // We reverse the vector of bits to ensure that the bits are
         // ordered from LSB to MSB.
         BitVec::from_bytes(&self.0).iter().rev().collect()
@@ -98,7 +98,7 @@ pub trait Commit {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct BitCommitment<P>(P);
+struct BitCommitment<P>(P);
 
 impl From<[u8; 32]> for Scalar {
     fn from(from: [u8; 32]) -> Self {
@@ -387,7 +387,7 @@ impl Proof {
 
     /// Compute challenge by hashing the statements (Pedersen Commitments) and
     /// announcements for each bitwise proof.
-    pub fn compute_challenge(
+    fn compute_challenge(
         C_G_is: &[secp256k1::Point<impl secp256k1::PointType>],
         C_H_is: &[ed25519::Point],
         U_G_0s: &[secp256k1::Point],

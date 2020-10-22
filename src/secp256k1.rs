@@ -18,11 +18,11 @@ lazy_static::lazy_static! {
         Scalar::from_non_zero_u32(NonZeroU32::new(2).expect("2 != 0"));
 }
 
-pub struct PedersenCommitment(Point);
+pub(crate) struct PedersenCommitment(Point);
 
 impl PedersenCommitment {
     /// Generate a Pedersen Commitment for the scalar `x`.
-    pub fn new<R: rand::RngCore + rand::CryptoRng>(
+    pub(crate) fn new<R: rand::RngCore + rand::CryptoRng>(
         rng: &mut R,
         x: &Scalar<Secret, Zero>,
     ) -> (Self, Scalar) {
@@ -52,7 +52,7 @@ impl Commit for PedersenCommitment {
 }
 
 /// Transform a bit into a `secp256k1::Scalar`.
-pub fn bit_as_scalar(bit: bool) -> Scalar<Secret, Zero> {
+pub(crate) fn bit_as_scalar(bit: bool) -> Scalar<Secret, Zero> {
     if bit {
         Scalar::one().mark::<Zero>()
     } else {
@@ -61,7 +61,7 @@ pub fn bit_as_scalar(bit: bool) -> Scalar<Secret, Zero> {
 }
 
 /// Calculate sum of `r_i * 2^i`, where `i` is the bit index.
-pub fn blinder_sum(r_is: &[Scalar]) -> Scalar {
+pub(crate) fn blinder_sum(r_is: &[Scalar]) -> Scalar {
     r_is.iter()
         .enumerate()
         .fold(Scalar::zero(), |acc, (i, r)| {
@@ -74,7 +74,7 @@ pub fn blinder_sum(r_is: &[Scalar]) -> Scalar {
 
 /// Check that the sum of `C_G_i * 2^i` minus `r * G_PRIME` is equal to the
 /// public value `xG` for all `C_G_i` in `C_G_is`.
-pub fn verify_bit_commitments_represent_dleq_commitment(
+pub(crate) fn verify_bit_commitments_represent_dleq_commitment(
     C_G_is: &[Point],
     xG: &Point,
     r: &Scalar,
