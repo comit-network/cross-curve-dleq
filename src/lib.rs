@@ -28,6 +28,11 @@ use std::ops::{Add, Sub};
 ///
 /// On the other hand, not all valid scalars for secp256k1 have the same bit
 /// representation for ed25519.
+#[cfg_attr(
+    feature = "serde",
+    serde(crate = "serde_crate"),
+    derive(serde_crate::Serialize, serde_crate::Deserialize)
+)]
 #[derive(Default, Debug, Clone, Copy, PartialEq)]
 pub struct Scalar([u8; 32]);
 
@@ -118,6 +123,11 @@ impl From<Scalar> for ed25519::Scalar {
 
 /// Non-interactive zero-knowledge proof of knowledge of the same discrete
 /// logarithm across secp256k1 and ed25519.
+#[cfg_attr(
+    feature = "serde",
+    serde(crate = "serde_crate"),
+    derive(serde_crate::Serialize, serde_crate::Deserialize)
+)]
 #[derive(Clone, Debug)]
 pub struct Proof {
     /// Pedersen Commitments for bits of the secp256k1 scalar.
