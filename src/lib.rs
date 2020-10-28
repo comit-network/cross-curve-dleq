@@ -128,7 +128,7 @@ impl From<Scalar> for ed25519::Scalar {
     serde(crate = "serde_crate"),
     derive(serde_crate::Serialize, serde_crate::Deserialize)
 )]
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Proof {
     /// Pedersen Commitments for bits of the secp256k1 scalar.
     ///
