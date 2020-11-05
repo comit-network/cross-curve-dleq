@@ -2,7 +2,10 @@ use crate::Commit;
 use ecdsa_fun::fun::marker::{Jacobian, Mark, NonZero, Normal, Secret, Zero};
 use std::num::NonZeroU32;
 
-pub use ecdsa_fun::fun::{g, marker, marker::PointType, s, Point, Scalar, G};
+pub use ecdsa_fun::{
+    fun::{g, marker, marker::PointType, s, Point, Scalar, G},
+    Signature,
+};
 
 lazy_static::lazy_static! {
     /// Alternate generator of secp256k1.
@@ -76,7 +79,7 @@ pub(crate) fn blinder_sum(r_is: &[Scalar]) -> Scalar {
 /// public value `xG` for all `C_G_i` in `C_G_is`.
 pub(crate) fn verify_bit_commitments_represent_dleq_commitment(
     C_G_is: &[Point],
-    xG: &Point,
+    X: &Point,
     r: &Scalar,
 ) -> bool {
     let C_G =
@@ -88,7 +91,7 @@ pub(crate) fn verify_bit_commitments_represent_dleq_commitment(
                 g!(acc + exp * C_G_i)
             });
 
-    &g!(C_G - r * G_PRIME) == xG
+    &g!(C_G - r * G_PRIME) == X
 }
 
 fn two_to_the_power_of(exp: usize) -> Scalar {
@@ -104,7 +107,7 @@ mod tests {
     proptest! {
         #![proptest_config(ProptestConfig::with_cases(10))]
         #[test]
-        fn bit_commitments_represent_dleq_commitment(x in proptest::scalar()) {
+        fn secp_bit_commitments_represent_dleq_commitment(x in proptest::scalar()) {
             let mut rng = rand::thread_rng();
 
             let xG = g!({ x.into_secp256k1() } * G).mark::<Normal>();
