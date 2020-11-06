@@ -104,7 +104,7 @@ fn two_to_the_power_of(exp: usize) -> Scalar {
     serde(crate = "serde_crate"),
     derive(serde_crate::Serialize, serde_crate::Deserialize)
 )]
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Signature {
     R: Point,
     s: Scalar,
