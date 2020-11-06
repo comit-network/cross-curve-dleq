@@ -6,9 +6,9 @@ edition = "2018"
 
 [dependencies]
 bit-vec = "0.6"
-generic-array = "0.14"
 curve25519-dalek = "2"
 ecdsa_fun = { git = "https://github.com/LLFourn/secp256kfun", rev = "510d48ef6a2b19805f7f5c70c598e5b03f668e7a", features = ["libsecp_compat"] }
+generic-array = "0.14"
 hex-literal = "0.2"
 lazy_static = "1.4"
 rand = "0.7"
