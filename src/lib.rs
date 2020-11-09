@@ -21,7 +21,7 @@ use ecdsa_fun::{
     ECDSA,
 };
 use generic_array::{
-    typenum::consts::{U252, U31, U32},
+    typenum::consts::{U31, U32},
     GenericArray,
 };
 use rand::{CryptoRng, Rng, RngCore};
@@ -161,35 +161,35 @@ pub struct Proof {
     /// Mathematical expression: `b_i * G + r_i * G_PRIME`, where `b_i` is the
     /// `ith` bit, `r_i` is its blinder, and `G` and `G_PRIME` are generators of
     /// secp256k1.
-    C_G_is: GenericArray<secp256k1::Point, U252>,
+    C_G_is: Vec<secp256k1::Point>,
     /// Pedersen Commitments for bits of the ed25519 scalar.
     ///
     /// Mathematical expression: `b_i * H + s_i * H_PRIME`, where `b_i` is the
     /// `ith` bit, `s_i` is its blinder, and `H` and `H_PRIME` are generators of
     /// secp256k1.
-    C_H_is: GenericArray<ed25519::Point, U252>,
+    C_H_is: Vec<ed25519::Point>,
     /// Challenges for proofs that a bit is equal to 0.
-    c_0s: GenericArray<Challenge, U252>,
+    c_0s: Vec<Challenge>,
     /// Challenges for proofs that a bit is equal to 1.
-    c_1s: GenericArray<Challenge, U252>,
+    c_1s: Vec<Challenge>,
     /// Announcements for proofs that a bit of the secp256k1 scalar is equal to
     /// 0.
-    U_G_0s: GenericArray<secp256k1::Point, U252>,
+    U_G_0s: Vec<secp256k1::Point>,
     /// Announcements for proofs that a bit of the ed25519 scalar is equal to 0.
-    U_H_0s: GenericArray<ed25519::Point, U252>,
+    U_H_0s: Vec<ed25519::Point>,
     /// Announcements for proofs that a bit of the secp256k1 scalar is equal to
     /// 1.
-    U_G_1s: GenericArray<secp256k1::Point, U252>,
+    U_G_1s: Vec<secp256k1::Point>,
     /// Announcements for proofs that a bit of the ed25519 scalar is equal to 0.
-    U_H_1s: GenericArray<ed25519::Point, U252>,
+    U_H_1s: Vec<ed25519::Point>,
     /// Responses for proofs that a bit of the secp256k1 scalar is equal to 0.
-    res_G_0s: GenericArray<secp256k1::Scalar, U252>,
+    res_G_0s: Vec<secp256k1::Scalar>,
     /// Responses for proofs that a bit of the ed25519 scalar is equal to 0.
-    res_H_0s: GenericArray<ed25519::Scalar, U252>,
+    res_H_0s: Vec<ed25519::Scalar>,
     /// Responses for proofs that a bit of the secp256k1 scalar is equal to 1.
-    res_G_1s: GenericArray<secp256k1::Scalar, U252>,
+    res_G_1s: Vec<secp256k1::Scalar>,
     /// Responses for proofs that a bit of the ed25519 scalar is equal to 1.
-    res_H_1s: GenericArray<ed25519::Scalar, U252>,
+    res_H_1s: Vec<ed25519::Scalar>,
     /// Blinder for the "overall" Pedersen Commitment of the secp256k1 scalar.
     ///
     /// Calculation: sum of `r_i * 2^i`, where `i` is the index of the bit and
@@ -249,25 +249,25 @@ impl Proof {
     pub fn new<R: RngCore + CryptoRng>(rng: &mut R, witness: &Scalar) -> Proof {
         let bits = witness.bits();
 
-        let mut C_G_is = GenericArray::<secp256k1::Point, U252>::default();
-        let mut r_is = GenericArray::<secp256k1::Scalar, U252>::default();
+        let mut C_G_is = Vec::new();
+        let mut r_is = Vec::new();
 
-        let mut C_H_is = GenericArray::<ed25519::Point, U252>::default();
-        let mut s_is = GenericArray::<ed25519::Scalar, U252>::default();
+        let mut C_H_is = Vec::new();
+        let mut s_is = Vec::new();
 
-        let mut c_cheats = GenericArray::<Challenge, U252>::default();
+        let mut c_cheats = Vec::new();
 
-        let mut U_G_0s = GenericArray::<secp256k1::Point, U252>::default();
-        let mut U_H_0s = GenericArray::<ed25519::Point, U252>::default();
-        let mut U_G_1s = GenericArray::<secp256k1::Point, U252>::default();
-        let mut U_H_1s = GenericArray::<ed25519::Point, U252>::default();
+        let mut U_G_0s = Vec::new();
+        let mut U_H_0s = Vec::new();
+        let mut U_G_1s = Vec::new();
+        let mut U_H_1s = Vec::new();
 
-        let mut res_G_0s = GenericArray::<secp256k1::Scalar, U252>::default();
-        let mut res_H_0s = GenericArray::<ed25519::Scalar, U252>::default();
-        let mut res_G_1s = GenericArray::<secp256k1::Scalar, U252>::default();
-        let mut res_H_1s = GenericArray::<ed25519::Scalar, U252>::default();
+        let mut res_G_0s = Vec::new();
+        let mut res_H_0s = Vec::new();
+        let mut res_G_1s = Vec::new();
+        let mut res_H_1s = Vec::new();
 
-        for (i, b) in bits.iter().enumerate() {
+        for b in bits.iter() {
             // compute commitment corresponding to each opening
             let (C_G, r) = secp256k1::PedersenCommitment::commit(rng, b);
             let (C_H, s) = ed25519::PedersenCommitment::commit(rng, b);
@@ -311,38 +311,38 @@ impl Proof {
                 res_H_cheat * *H_PRIME - c_cheat * sH_prime
             };
 
-            C_G_is[i] = C_G;
-            r_is[i] = r;
+            C_G_is.push(C_G);
+            r_is.push(r);
 
-            C_H_is[i] = C_H;
-            s_is[i] = s;
+            C_H_is.push(C_H);
+            s_is.push(s);
 
-            c_cheats[i] = c_cheat;
+            c_cheats.push(c_cheat);
 
             if b {
                 // if the the actual value of the bit is 1, we cheat on the announcement and
                 // response for the proof that proves that the value of the bit is 0
-                U_G_0s[i] = U_G_cheat;
-                U_H_0s[i] = U_H_cheat;
-                res_G_0s[i] = res_G_cheat;
-                res_H_0s[i] = res_H_cheat;
+                U_G_0s.push(U_G_cheat);
+                U_H_0s.push(U_H_cheat);
+                res_G_0s.push(res_G_cheat);
+                res_H_0s.push(res_H_cheat);
 
-                U_G_1s[i] = U_G;
-                U_H_1s[i] = U_H;
-                res_G_1s[i] = u_G;
-                res_H_1s[i] = u_H;
+                U_G_1s.push(U_G);
+                U_H_1s.push(U_H);
+                res_G_1s.push(u_G);
+                res_H_1s.push(u_H);
             } else {
-                U_G_0s[i] = U_G;
-                U_H_0s[i] = U_H;
-                res_G_0s[i] = u_G;
-                res_H_0s[i] = u_H;
+                U_G_0s.push(U_G);
+                U_H_0s.push(U_H);
+                res_G_0s.push(u_G);
+                res_H_0s.push(u_H);
 
                 // if the the actual value of the bit is 0, we cheat on the announcement and
                 // response for the proof that proves that the value of the bit is 1
-                U_G_1s[i] = U_G_cheat;
-                U_H_1s[i] = U_H_cheat;
-                res_G_1s[i] = res_G_cheat;
-                res_H_1s[i] = res_H_cheat;
+                U_G_1s.push(U_G_cheat);
+                U_H_1s.push(U_H_cheat);
+                res_G_1s.push(res_G_cheat);
+                res_H_1s.push(res_H_cheat);
             }
         }
 
@@ -363,8 +363,8 @@ impl Proof {
             &U_H_1s,
         );
 
-        let mut c_0s = GenericArray::<Challenge, U252>::default();
-        let mut c_1s = GenericArray::<Challenge, U252>::default();
+        let mut c_0s = Vec::new();
+        let mut c_1s = Vec::new();
 
         for (i, b) in bits.iter().enumerate() {
             if b {
@@ -378,8 +378,8 @@ impl Proof {
                     .expect("non-zero response");
                 res_H_1s[i] += c_1.into_ed25519() * s_is[i];
 
-                c_0s[i] = c_0;
-                c_1s[i] = c_1;
+                c_0s.push(c_0);
+                c_1s.push(c_1);
             } else {
                 let c_1 = c_cheats[i];
                 // compute challenge for the actual bit
@@ -391,8 +391,8 @@ impl Proof {
                     .expect("non-zero response");
                 res_H_0s[i] += c_0.into_ed25519() * s_is[i];
 
-                c_0s[i] = c_0;
-                c_1s[i] = c_1;
+                c_0s.push(c_0);
+                c_1s.push(c_1);
             };
         }
 
@@ -485,6 +485,22 @@ impl Proof {
     /// 3. Ensure that each bitwise response satisfies its corresponding
     /// challenge.
     pub fn verify(&self, xG: secp256k1::Point, xH: ed25519::Point) -> Result<(), Error> {
+        if self.C_G_is.len() != 252
+            || self.C_H_is.len() != 252
+            || self.c_0s.len() != 252
+            || self.c_1s.len() != 252
+            || self.U_G_0s.len() != 252
+            || self.U_G_1s.len() != 252
+            || self.U_H_0s.len() != 252
+            || self.U_H_1s.len() != 252
+            || self.res_G_0s.len() != 252
+            || self.res_G_1s.len() != 252
+            || self.res_H_0s.len() != 252
+            || self.res_H_1s.len() != 252
+        {
+            return Err(Error::WrongNumberOfElements);
+        }
+
         // avoid a quirk in ed25519 where some points can be used to produce wildcard
         // signatures. See: https://slowli.github.io/ed25519-quirks/wildcards/
         if !xH.is_torsion_free() {
@@ -559,6 +575,8 @@ impl Proof {
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    #[error("one or more of the arrays included in the proof did not have exactly 252 elements")]
+    WrongNumberOfElements,
     #[error("sum of bitwise split challenges not equal to total challenge: c_0 + c_1 != c")]
     ChallengeSum,
     #[error("bitwise response did not satisfy challenge")]
